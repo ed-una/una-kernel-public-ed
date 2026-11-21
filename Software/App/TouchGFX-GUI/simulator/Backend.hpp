@@ -823,10 +823,13 @@ private:
         }
 
         // Glances
+        static const struct { const char *name; GlanceProvider::Kind kind; } kMockGlances[skGlancesCount] = {
+            { "Steps",   GlanceProvider::Kind::Steps   },
+            { "Live HR", GlanceProvider::Kind::LiveHr  },
+            { "Battery", GlanceProvider::Kind::Battery },
+        };
         for (uint32_t i = 0; i < skGlancesCount; ++i) {
-            char tmpName[App::kNameLen]{};
-            snprintf(tmpName, App::kNameLen, "glance_%u", i);
-            mGlance[i].createGlance(tmpName, 100 + i);
+            mGlance[i].createGlance(kMockGlances[i].name, 100 + i, kMockGlances[i].kind);
         }
         // As the kernel does right after its app scan, ahead of Booted.
         sendGlancesAtRest("boot");
@@ -1092,11 +1095,14 @@ private:
         uint32_t pid() const { return mPid; }
         const App::GlanceData &stored() const { return mStored; }
 
+        // Three layouts in the manner of the stock glances, so scrolling from
+        // one to the next shows two different items, as on the watch.
+        enum class Kind { Steps, LiveHr, Battery };
+
         // What a stock glance shows before its sensor value arrives.
         void setPlaceholder()
         {
-            mTextTime.setText("---");
-            mTextTemperature.setText("---");
+            mTextValue.setText("---");
         }
 
         App::GlanceData getData() {
@@ -1111,77 +1117,96 @@ private:
             return d;
         }
         
+        // A new sensor value, once a second.
         void glanceUpdate()
         {
-            mTemperature += 0.1f;
-            if (mTemperature > 25) {
-                mTemperature = 23.5f;
+            switch (mKind) {
+                case Kind::Steps:
+                    mValue += 23;
+                    mTextValue.print("%d,%03d", mValue / 1000, mValue % 1000);
+                    mBar.size({ static_cast<uint16_t>(2 + (136 * (mValue % 10000)) / 10000), 6 });
+                    break;
+                case Kind::LiveHr:
+                    mValue = (mValue >= 84) ? 68 : mValue + 3;
+                    mTextValue.print("%d", mValue);
+                    break;
+                case Kind::Battery:
+                    mValue = (mValue <= 15) ? 100 : mValue - 1;
+                    mTextValue.print("%d%%", mValue);
+                    mBar.size({ static_cast<uint16_t>(2 + (31 * mValue) / 100), 16 });
+                    break;
             }
-
-            mTextTemperature.print("%.1f", mTemperature);
-
-            std::time_t t = time(NULL);
-            struct tm tm;
-            localtime_s(&tm, &t);
-
-            mTextTime.print("%02d:%02d:%02d", tm.tm_hour, tm.tm_min, tm.tm_sec);
         }
 
-
-        void createGlance(const char* name, uint32_t pid)
+        void createGlance(const char* name, uint32_t pid, Kind kind)
         {
             mPid = pid;
-            GlanceProvider& data = *this;
-            snprintf(data.mAltName, sizeof(data.mAltName), name);
+            mKind = kind;
+            snprintf(mAltName, sizeof(mAltName), "%s", name);
 
-            // first row
-            data.mUI.createRect().init(
-                { 50,   0 },
-                { 140, 30 },
-                GlanceColor_t::GLANCE_COLOR_BLUE,
-                GlanceColor_t::GLANCE_COLOR_BLACK);
-
-            SDK::Glance::ControlRectangle panelClock = data.mUI.createRect().init({ 50,  0 },
-                { 30, 30 },
-                GlanceColor_t::GLANCE_COLOR_BLUE,
-                GlanceColor_t::GLANCE_COLOR_BLACK);
-
-            GlanceSize_t  clockImageSize = { CLOCK24_WIDTH, CLOCK24_HEIGHT };
-            GlancePoint_t clockImagePos = SDK::Glance::Align::placeWithin(panelClock.pos(),
-                panelClock.size(),
-                clockImageSize,
-                GlanceAlignH_t::GLANCE_ALIGN_H_CENTER,
-                GlanceAlignV_t::GLANCE_ALIGN_V_CENTER);
-
-            data.mUI.createImage().init(clockImagePos, clockImageSize, CLOCK24_ABGR2222);
-
-            data.mTextTime = data.mUI.createText();
-            data.mTextTime.pos({ 80, 2 }, { 110, 26 })
-                .color(GlanceColor_t::GLANCE_COLOR_YELLOW_DARK)
-                .setText("00:00:00")
-                .alignment(GlanceAlignH_t::GLANCE_ALIGN_H_CENTER);
-
-            // second row
-            data.mUI.createRect().init({ 50,  30 }, { 95, 30 },
-                GlanceColor_t::GLANCE_COLOR_BLUE,
-                GlanceColor_t::GLANCE_COLOR_RED);
-
-            data.mUI.createText().init({ 50, 32 }, { 90, 26 },
-                "Temp, C:",
+            // A small grey label over every value, as the stock glances do.
+            const char *label = (kind == Kind::Steps) ? "Steps today"
+                              : (kind == Kind::LiveHr) ? "Heart rate" : "Battery";
+            mUI.createText().init({ 50, 0 }, { 140, 22 }, label,
                 GlanceFont_t::GLANCE_FONT_POPPINS_REGULAR_18,
-                GlanceColor_t::GLANCE_COLOR_WHITE,
-                GlanceAlignH_t::GLANCE_ALIGN_H_RIGHT);
+                GlanceColor_t::GLANCE_COLOR_GRAY,
+                GlanceAlignH_t::GLANCE_ALIGN_H_LEFT);
 
+            switch (kind) {
+                case Kind::Steps:
+                    // Big white number over a green progress bar.
+                    mValue = 8412;
+                    mTextValue = mUI.createText();
+                    mTextValue.pos({ 50, 16 }, { 140, 36 })
+                        .font(GlanceFont_t::GLANCE_FONT_POPPINS_SEMIBOLD_30)
+                        .color(GlanceColor_t::GLANCE_COLOR_WHITE)
+                        .alignment(GlanceAlignH_t::GLANCE_ALIGN_H_LEFT)
+                        .setText("8,412");
+                    mUI.createRect().init({ 50, 52 }, { 140, 6 },
+                        GlanceColor_t::GLANCE_COLOR_GRAY_DARK,
+                        GlanceColor_t::GLANCE_COLOR_BLACK);
+                    mBar = mUI.createRect().init({ 51, 52 }, { 114, 6 },
+                        GlanceColor_t::GLANCE_COLOR_GREEN,
+                        GlanceColor_t::GLANCE_COLOR_GREEN);
+                    break;
 
-            data.mUI.createRect().init({ 145, 30 }, { 45, 30 },
-                GlanceColor_t::GLANCE_COLOR_BLUE,
-                GlanceColor_t::GLANCE_COLOR_GREEN);
+                case Kind::LiveHr:
+                    // Red value with its unit, and the clock icon as a marker.
+                    mValue = 72;
+                    mTextValue = mUI.createText();
+                    mTextValue.pos({ 50, 14 }, { 80, 44 })
+                        .font(GlanceFont_t::GLANCE_FONT_POPPINS_SEMIBOLD_35)
+                        .color(GlanceColor_t::GLANCE_COLOR_RED)
+                        .alignment(GlanceAlignH_t::GLANCE_ALIGN_H_LEFT)
+                        .setText("72");
+                    mUI.createText().init({ 118, 30 }, { 50, 22 }, "bpm",
+                        GlanceFont_t::GLANCE_FONT_POPPINS_REGULAR_18,
+                        GlanceColor_t::GLANCE_COLOR_GRAY,
+                        GlanceAlignH_t::GLANCE_ALIGN_H_LEFT);
+                    mUI.createImage().init({ 166, 28 }, { CLOCK24_WIDTH, CLOCK24_HEIGHT },
+                        CLOCK24_ABGR2222);
+                    break;
 
-            data.mTextTemperature = data.mUI.createText();
-            data.mTextTemperature.pos({ 150, 32 }, { 40, 26 })
-                .color(GlanceColor_t::GLANCE_COLOR_WHITE)
-                .alignment(GlanceAlignH_t::GLANCE_ALIGN_H_CENTER)
-                .setText("23.5");
+                case Kind::Battery:
+                    // Teal percentage beside a battery drawn from rectangles.
+                    mValue = 86;
+                    mTextValue = mUI.createText();
+                    mTextValue.pos({ 50, 16 }, { 90, 36 })
+                        .font(GlanceFont_t::GLANCE_FONT_POPPINS_SEMIBOLD_30)
+                        .color(GlanceColor_t::GLANCE_COLOR_TEAL)
+                        .alignment(GlanceAlignH_t::GLANCE_ALIGN_H_LEFT)
+                        .setText("86%");
+                    mUI.createRect().init({ 144, 24 }, { 42, 22 },
+                        GlanceColor_t::GLANCE_COLOR_WHITE,
+                        GlanceColor_t::GLANCE_COLOR_BLACK);
+                    mUI.createRect().init({ 186, 30 }, { 4, 10 },
+                        GlanceColor_t::GLANCE_COLOR_WHITE,
+                        GlanceColor_t::GLANCE_COLOR_WHITE);
+                    mBar = mUI.createRect().init({ 147, 27 }, { 29, 16 },
+                        GlanceColor_t::GLANCE_COLOR_GREEN,
+                        GlanceColor_t::GLANCE_COLOR_GREEN);
+                    break;
+            }
         }
 
 
@@ -1189,10 +1214,11 @@ private:
         char mAltName[App::kNameLen]{};
         uint32_t mPid = 0;
         SDK::Glance::Form mUI{ 240, 60 };
-        SDK::Glance::ControlText mTextTime;
-        SDK::Glance::ControlText mTextTemperature;
-        float                    mTemperature;
-        App::GlanceData          mStored{};
+        Kind                          mKind = Kind::Steps;
+        int                           mValue = 0;
+        SDK::Glance::ControlText      mTextValue;
+        SDK::Glance::ControlRectangle mBar{ nullptr, 0 };   // Steps and Battery only
+        App::GlanceData               mStored{};
     };
 
     GlanceProvider mGlance[skGlancesCount];
