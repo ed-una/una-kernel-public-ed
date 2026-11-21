@@ -80,8 +80,8 @@ void MenuGlances::selectNext()
     }
 
     int16_t p = wheel.getSelectedItem() + 1;
-    wheel.animateToItem(p, Gui::Config::kMenuAnimationSteps);
-    sideBar.animateToId(p, Gui::Config::kMenuAnimationSteps);
+    wheel.animateToItem(p, Gui::Config::kGlancesAnimationSteps);
+    sideBar.animateToId(p, Gui::Config::kGlancesAnimationSteps);
 
     update();
 }
@@ -93,8 +93,8 @@ void MenuGlances::selectPrev()
     }
 
     int16_t p = wheel.getSelectedItem() - 1;
-    wheel.animateToItem(p, Gui::Config::kMenuAnimationSteps);
-    sideBar.animateToId(p, Gui::Config::kMenuAnimationSteps);
+    wheel.animateToItem(p, Gui::Config::kGlancesAnimationSteps);
+    sideBar.animateToId(p, Gui::Config::kGlancesAnimationSteps);
 
     update();
 }

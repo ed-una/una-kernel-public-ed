@@ -28,6 +28,12 @@ namespace Config
 
 constexpr int32_t kMenuAnimationSteps = 4;
 
+/// The Glances screen's own scroll length, in frames, shorter than the other
+/// menus' so a press there answers sooner: at 10 frames a second each step is
+/// 100 ms of motion. Separate so the Glances screen can be tuned on its own;
+/// the other menus are not part of that change.
+constexpr int32_t kGlancesAnimationSteps = 2;
+
 constexpr uint32_t kScreenTimeoutSteps      = GUI_CONFIG_MS_2_TICKS(30000);     // 30s
 constexpr uint32_t kSavedScreenTimeout      = GUI_CONFIG_MS_2_TICKS(1000);      // 1s;
 constexpr uint32_t kTitleInfoSwitchPeriod   = GUI_CONFIG_MS_2_TICKS(3000);      // 3s;
