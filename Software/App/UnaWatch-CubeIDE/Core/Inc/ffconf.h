@@ -272,7 +272,12 @@
 */
 
 
-#define FF_FS_LOCK		10
+/* 20, not 10: opening Glances starts every glance app at once, and each
+/  app's service is read from its own .uapp file. With 11 glances, plus the
+/  syslog file the logger keeps open, the 11th open failed with
+/  FR_TOO_MANY_OPEN_FILES whenever the loads overlapped (watch log 0172), and
+/  that glance went missing from the screen. Each entry is 16 bytes. */
+#define FF_FS_LOCK		20
 /* The option FF_FS_LOCK switches file lock function to control duplicated file open
 /  and illegal operation to open objects. This option must be 0 when FF_FS_READONLY
 /  is 1.
