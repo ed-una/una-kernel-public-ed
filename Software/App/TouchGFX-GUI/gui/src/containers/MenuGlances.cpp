@@ -275,6 +275,11 @@ void MenuGlances::scrollBy(int8_t direction)
             if (mScrollVariant == 5 || mScrollVariant == 6) {
                 mScrollFx.startBlend(direction, static_cast<uint8_t>(mOrbitFx.getSteps() - 1),
                                      mScrollVariant == 6, mScrollVariant);
+                if (mScrollVariant == 6) {
+                    // One colour for this scroll's outgoing and incoming
+                    // cubes, never the last scroll's.
+                    mScrollFx.setCubeColour(GlanceScrollFx::nextCubeColour());
+                }
             }
             sideBar.animateToId(p, mOrbitFx.getSteps());
         }

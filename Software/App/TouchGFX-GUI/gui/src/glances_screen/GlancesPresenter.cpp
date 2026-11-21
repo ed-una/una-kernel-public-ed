@@ -38,6 +38,14 @@ void GlancesPresenter::activate()
 
     onPhoneNotificationListChanged(model->phoneNotificationGetAll());
 
+    // The scroll's cube colours (variant 6): seeded once per boot, on the
+    // first visit, from the watch's clock, mixed with the cycle counter so two
+    // boots in the same second still differ. Later calls are ignored.
+    const std::tm now = model->getDateTime();
+    const uint32_t clock = static_cast<uint32_t>(((now.tm_year * 366 + now.tm_yday) * 24 + now.tm_hour) * 3600
+                                                 + now.tm_min * 60 + now.tm_sec);
+    GlanceScrollFx::seedCubeColours(clock ^ (GlanceScrollFx::ticksNow() * 2654435761u));
+
     // Start Glances
     model->appGlancesStart();
 

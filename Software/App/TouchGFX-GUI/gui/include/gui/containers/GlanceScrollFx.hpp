@@ -105,6 +105,26 @@ public:
      */
     void startBlend(int8_t direction, uint8_t frames, bool settleInPlace, uint8_t logAs);
 
+    /**
+     * @brief   Paint this scroll's cubes in one colour (0: each cell's own).
+     * @note    Call after startBlend(). Variant 6 gives each scroll a colour
+     *          from nextCubeColour(); the shapes still come from the content.
+     */
+    void setCubeColour(uint8_t colour) { mCubeColour = colour; }
+
+    /// The cube palette: six ABGR2222 colours with every channel at 1 or 2,
+    /// so one step lighter (top face) and one step darker (side faces) stay
+    /// distinct on every channel.
+    static constexpr int kCubePaletteSize = 6;
+    static const uint8_t kCubePalette[kCubePaletteSize];
+
+    /// Seed the colour picker. Only the first call after boot counts.
+    static void seedCubeColours(uint32_t seed);
+
+    /// A palette colour for the next scroll, never the last one picked
+    /// (xorshift32).
+    static uint8_t nextCubeColour();
+
     /// Take GlanceOrbitFx's step (0 ends). kCubeBlend only.
     void followStep(uint8_t step);
 
@@ -133,6 +153,10 @@ private:
     int8_t mDirection = 1;
     bool mSettleInPlace = false;    ///< see startBlend()
     uint8_t mLogAs = 0;             ///< see startBlend(); 0: mVariant
+    uint8_t mCubeColour = 0;        ///< see setCubeColour()
+
+    static uint32_t sRng;           ///< xorshift32 state; 0 until seeded
+    static int sLastColour;         ///< index of the last colour picked, -1 none
 
     /// Variant 5: each 10 px cell's colour (0 for no ink), of the outgoing
     /// content (from mClean, at the press) and of the incoming one (read in
@@ -171,7 +195,8 @@ private:
     /// The cubes of @p cells, each moved @p dy (alternate cells 3 or 6 px
     /// times @p dy's sign when @p stagger), only inside @p clip.
     static void paintCubes(uint8_t* origin, int32_t stride, const touchgfx::Rect& clip,
-                           const uint8_t cells[kCellRows][kCellCols], int dySign, bool stagger);
+                           const uint8_t cells[kCellRows][kCellCols], int dySign, bool stagger,
+                           uint8_t colour = 0);
 
     void logCost() const;
 };

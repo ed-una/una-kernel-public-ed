@@ -125,6 +125,45 @@ uint32_t GlanceScrollFx::ticksToUs(uint32_t ticks)
 #endif
 }
 
+// ABGR2222: kAlpha | blue << 4 | green << 2 | red, every channel 1 or 2.
+const uint8_t GlanceScrollFx::kCubePalette[kCubePaletteSize] = {
+    kAlpha | (1 << 4) | (1 << 2) | 2,   // red      R2 G1 B1
+    kAlpha | (1 << 4) | (2 << 2) | 1,   // green    R1 G2 B1
+    kAlpha | (2 << 4) | (1 << 2) | 1,   // blue     R1 G1 B2
+    kAlpha | (1 << 4) | (2 << 2) | 2,   // yellow   R2 G2 B1
+    kAlpha | (2 << 4) | (1 << 2) | 2,   // magenta  R2 G1 B2
+    kAlpha | (2 << 4) | (2 << 2) | 1,   // cyan     R1 G2 B2
+};
+
+uint32_t GlanceScrollFx::sRng = 0;
+int GlanceScrollFx::sLastColour = -1;
+
+void GlanceScrollFx::seedCubeColours(uint32_t seed)
+{
+    if (sRng != 0) {
+        return;     // once per boot
+    }
+    sRng = seed ? seed : 0x9E3779B9u;   // xorshift32 must not start at 0
+}
+
+uint8_t GlanceScrollFx::nextCubeColour()
+{
+    if (sRng == 0) {
+        seedCubeColours(ticksNow());
+    }
+    // xorshift32 (Marsaglia).
+    sRng ^= sRng << 13;
+    sRng ^= sRng >> 17;
+    sRng ^= sRng << 5;
+    // Any colour the first time; after that one of the five others, so two
+    // scrolls in a row never share a colour.
+    const int pick = (sLastColour < 0)
+            ? static_cast<int>(sRng % kCubePaletteSize)
+            : (sLastColour + 1 + static_cast<int>(sRng % (kCubePaletteSize - 1))) % kCubePaletteSize;
+    sLastColour = pick;
+    return kCubePalette[pick];
+}
+
 GlanceScrollFx::GlanceScrollFx()
 {
     setTouchable(false);
@@ -183,6 +222,7 @@ void GlanceScrollFx::startBlend(int8_t direction, uint8_t frames, bool settleInP
     mFrames = (frames > kMaxFxFrames) ? kMaxFxFrames : frames;
     mSettleInPlace = settleInPlace;
     mLogAs = logAs;
+    mCubeColour = 0;
     mStep = 1;
     mDrawnStep = 0;
     std::fill(std::begin(mStepUs), std::end(mStepUs), 0u);
@@ -244,7 +284,15 @@ void GlanceScrollFx::logCost() const
     // the names are variant 5's.
     const unsigned shown = (mVariant == kCubeBlend) ? (mLogAs ? mLogAs : 5u)
                                                     : static_cast<unsigned>(mVariant);
-    if (mFrames >= 3) {
+    if (mCubeColour != 0) {
+        LOG_DEBUG("GlanceFx: variant %u (%s): cube colour 0x%02X, frame 1 drew in %lu us, "
+                  "frame 2 in %lu us, frame 3 in %lu us, last clean copy %lu us\n",
+                  shown, variantName(mVariant), static_cast<unsigned>(mCubeColour),
+                  static_cast<unsigned long>(mStepUs[1]),
+                  static_cast<unsigned long>(mStepUs[2]),
+                  static_cast<unsigned long>(mStepUs[3]),
+                  static_cast<unsigned long>(mCopyUs));
+    } else if (mFrames >= 3) {
         LOG_DEBUG("GlanceFx: variant %u (%s): frame 1 drew in %lu us, frame 2 in %lu us, "
                   "frame 3 in %lu us, last clean copy %lu us\n",
                   shown, variantName(mVariant),
@@ -423,17 +471,17 @@ void GlanceScrollFx::drawCubeBlend(uint8_t* origin, int32_t stride, const Rect& 
     }
     fill(origin, stride, clip, kBlack);
     if (mStep == 1) {
-        paintCubes(origin, stride, clip, mOldCells, -mDirection, true);
+        paintCubes(origin, stride, clip, mOldCells, -mDirection, true, mCubeColour);
     } else if (mSettleInPlace && mFrames >= 3) {
         // Variant 6: short of their places, then in place, as variant 3's
         // cubes arrive.
         if (mStep == mFrames - 1) {
-            paintCubes(origin, stride, clip, mNewCells, mDirection, true);
+            paintCubes(origin, stride, clip, mNewCells, mDirection, true, mCubeColour);
         } else if (mStep == mFrames) {
-            paintCubes(origin, stride, clip, mNewCells, 0, true);
+            paintCubes(origin, stride, clip, mNewCells, 0, true, mCubeColour);
         }
     } else if (mStep == mFrames) {
-        paintCubes(origin, stride, clip, mNewCells, mDirection, true);
+        paintCubes(origin, stride, clip, mNewCells, mDirection, true, mCubeColour);
     }
 }
 
@@ -457,16 +505,19 @@ void GlanceScrollFx::readCells(const uint8_t* origin, int32_t stride, const Rect
 }
 
 void GlanceScrollFx::paintCubes(uint8_t* origin, int32_t stride, const Rect& clip,
-                                const uint8_t cells[kCellRows][kCellCols], int dySign, bool stagger)
+                                const uint8_t cells[kCellRows][kCellCols], int dySign, bool stagger,
+                                uint8_t colour)
 {
     constexpr int16_t x0 = (kWidth - kCellCols * kCell) / 2;
     const int16_t inset = (kCell - kCube) / 2;
     for (int16_t cy = 0; cy < kCellRows; ++cy) {
         for (int16_t cx = 0; cx < kCellCols; ++cx) {
-            const uint8_t c = cells[cy][cx];
-            if (c == 0) {
+            // A cell with ink is a cube: in its own colour, or in the
+            // scroll's colour when one is given.
+            if (cells[cy][cx] == 0) {
                 continue;
             }
+            const uint8_t c = colour ? colour : cells[cy][cx];
             const int16_t dy = static_cast<int16_t>(dySign * ((stagger && ((cx + cy) & 1)) ? 6 : 3));
             // Bright colours keep their colour on top and darken down the
             // sides; dim ones lighten on top, so a cube never sinks to black.
