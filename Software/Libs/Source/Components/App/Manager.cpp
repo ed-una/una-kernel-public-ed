@@ -1122,6 +1122,13 @@ void Manager::onGlanceStop(App::Application *app)
     }
 }
 
+void Manager::onGlanceUpdate(App::Application *app)
+{
+    if (mLifeCycleCb) {
+        mLifeCycleCb->onGlanceUpdate(app);
+    }
+}
+
 void Manager::onGuiStartFailed(App::Application *app)
 {
     if (mLifeCycleCb) {

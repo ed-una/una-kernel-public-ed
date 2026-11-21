@@ -220,6 +220,7 @@ private:
     virtual void onGuiSuspend(App::Application *app) override;
     virtual void onGlanceRun(App::Application *app) override;
     virtual void onGlanceStop(App::Application *app) override;
+    virtual void onGlanceUpdate(App::Application *app) override;
     virtual void onGuiResumeRequest(App::Application *app) override;
     virtual void onGuiStartFailed(App::Application *app) override;
     virtual void onCapabilities(App::Application *app, const App::Capabilities &caps) override;

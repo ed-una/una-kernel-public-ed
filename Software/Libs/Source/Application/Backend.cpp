@@ -588,7 +588,20 @@ void Backend::sendEpoTimeToGui(Interface::IGps::EpoPeriod period)
 
 bool Backend::receiveGuiEvent(B2GEvent::Data &data)
 {
-    return mGuiTxQueue.pop(data, 0);
+    if (!mGuiTxQueue.pop(data, 0)) {
+        return false;
+    }
+
+    // On the GUI thread, as it takes the event. A glance list taken is the
+    // moment the next one may be built: anything reported since this one was
+    // built asks for it now, so the screen gets it on its next frame and never
+    // has two lists waiting (see App::GlanceListSignal).
+    if (std::holds_alternative<B2GEvent::UserAppGlanceList>(data) && mGlanceList.delivered()) {
+        if (!sendEventToBackend(G2BEvent::AppGlancesChanged{})) {
+            mGlanceList.postFailed();
+        }
+    }
+    return true;
 }
 
 bool Backend::sendEventToBackend(const G2BEvent::Data &data)
@@ -1162,6 +1175,11 @@ void Backend::guiHandler(const G2BEvent::UserAppGlancesStart &evt)
     App::GlanceTiming::gOpenedAtMs.store(openedMs, std::memory_order_relaxed);
     mGlanceListsSent = 0;
 
+    // Open before the apps are asked to start, so the first of them to report
+    // is pushed, and with nothing left in flight from the last visit.
+    mGlanceList.reset();
+    mGlancesOpen.store(true);
+
     App::Manager& appmgr = App::Manager::GetInstance();
     const uint32_t asked = appmgr.startGlances();
 
@@ -1176,6 +1194,9 @@ void Backend::guiHandler(const G2BEvent::UserAppGlancesStop &evt)
 {
     LOG_DEBUG("UserAppGlancesStop\n");
 
+    mGlancesOpen.store(false);
+    mGlanceList.reset();
+
     App::Manager& appmgr = App::Manager::GetInstance();
     appmgr.stopGlances();
 
@@ -1184,10 +1205,38 @@ void Backend::guiHandler(const G2BEvent::UserAppGlancesStop &evt)
             static_cast<unsigned long>(App::GlanceTiming::SinceOpenMs(OS::GetTimeMs())));
 }
 
+// The GUI asks on opening, then once a second. Since glance apps' reports are
+// pushed, the second-by-second ask is a fallback: it recovers a push lost to a
+// full queue, for an app whose value then stops changing. It goes through the
+// same signal as the pushes, so it never puts a second list in the GUI's
+// queue: with one in flight it only makes sure another follows it.
 void Backend::guiHandler(const G2BEvent::UserAppGlancesListReq &evt)
 {
     LOG_DEBUG("UserAppListGlancesReq\n");
+
+    if (mGlanceList.markDirty()) {
+        sendGlanceList("request");
+    }
+}
+
+// Posted by onGlanceUpdate() or by the GUI taking the last list.
+void Backend::guiHandler(const G2BEvent::AppGlancesChanged &evt)
+{
+    // A report from a visit that has since ended. The signal was reset when
+    // the screen closed, and will be again when it opens.
+    if (!mGlancesOpen.load()) {
+        return;
+    }
+    sendGlanceList("push");
+}
+
+void Backend::sendGlanceList(const char *reason)
+{
     App::Manager& appmgr = App::Manager::GetInstance();
+
+    // Before the data is read: anything reported from here on is either in
+    // this list or asks for the next one.
+    mGlanceList.beginBuild();
 
     const uint32_t startMs = OS::GetTimeMs();
     B2GEvent::UserAppGlanceList rsp {};
@@ -1197,10 +1246,15 @@ void Backend::guiHandler(const G2BEvent::UserAppGlancesListReq &evt)
 
     const size_t items = rsp.list->size();
     const bool sent = sendEventToGui(rsp);
+    if (!sent) {
+        // Nothing in flight after all. What this list held is shown by the
+        // next report or the GUI's next ask.
+        mGlanceList.postFailed();
+    }
 
     const uint32_t nowMs = OS::GetTimeMs();
-    GLANCE_TIMING_LOG("list #%lu (request): %lu items, built in %lu ms%s, t+%lu\n",
-            static_cast<unsigned long>(++mGlanceListsSent),
+    GLANCE_TIMING_LOG("list #%lu (%s): %lu items, built in %lu ms%s, t+%lu\n",
+            static_cast<unsigned long>(++mGlanceListsSent), reason,
             static_cast<unsigned long>(items),
             static_cast<unsigned long>(App::GlanceTiming::ElapsedMs(startMs, nowMs)),
             sent ? "" : ", DROPPED (GUI queue full)",
@@ -2830,6 +2884,26 @@ void Backend::onIdle(App::Application *app)
         // instance that stays only costs memory until then.
         mAppsIdlePending.store(false);
         LOG_WARNING("Idle app release dropped (backend queue full)\n");
+    }
+}
+
+void Backend::onGlanceUpdate(App::Application *app)
+{
+    (void)app;
+
+    // On the reporting app's own thread, which must not build the list: that
+    // reads every glance app and the sort settings, which belong to the
+    // Backend thread. Carried there as onIdle() carries its report, and as
+    // that one is, coalesced: a dozen glances starting together ask for one
+    // list, not a dozen.
+    if (!mGlancesOpen.load() || !mGlanceList.markDirty()) {
+        return;
+    }
+    if (!sendEventToBackend(G2BEvent::AppGlancesChanged{})) {
+        // Not lost for good: the state stays dirty, so the next report or the
+        // GUI's next ask sends it.
+        mGlanceList.postFailed();
+        LOG_WARNING("Glance list push dropped (backend queue full)\n");
     }
 }
 

@@ -41,6 +41,7 @@
 #include "AppTypes.hpp"
 #include "AppSurface.hpp"
 #include "App/Manager.hpp"
+#include "App/GlanceListSignal.hpp"
 
 #include "DailyHealth/Service.hpp"
 
@@ -392,6 +393,20 @@ private:
     /// the GlanceTiming lines can number them. Backend thread only.
     uint32_t mGlanceListsSent = 0;
 
+    /// When a new glance list is built, see App::GlanceListSignal. Glance
+    /// apps report on their own threads, the Backend builds, and the GUI
+    /// thread says when it has taken a list (receiveGuiEvent()).
+    App::GlanceListSignal mGlanceList;
+
+    /// The Glances screen is open. Set and cleared on the Backend thread, read
+    /// on the app threads, so a glance reporting after the screen closed does
+    /// not post a list nobody will look at.
+    std::atomic<bool> mGlancesOpen {false};
+
+    /// Build the glance list and send it to the GUI. Backend thread only.
+    /// @param reason: why, for the GlanceTiming line ("request" or "push").
+    void sendGlanceList(const char *reason);
+
     /// Mass storage opened and not yet closed. Set and cleared on the Backend
     /// thread only, by the MsdOpen and MsdClose handlers; atomic so the CLI
     /// can read it.
@@ -422,6 +437,9 @@ private:
     void guiHandler(const G2BEvent::WatchFaceStopped &evt);
     // Internal: frees the instances of apps that have gone idle (see AppsIdle).
     void guiHandler(const G2BEvent::AppsIdle &evt);
+    // Internal: sends the Glances screen a list with new glance data (see
+    // AppGlancesChanged).
+    void guiHandler(const G2BEvent::AppGlancesChanged &evt);
     // Internal: makes room for a GUI a service asked for (see AppGuiDidNotFit).
     void guiHandler(const G2BEvent::AppGuiDidNotFit &evt);
     void guiHandler(const G2BEvent::PlayError &evt);
@@ -543,6 +561,7 @@ private:
      virtual void onGuiStart(App::Application *app) override;
      virtual void onGuiStop(App::Application *app) override;
      virtual void onIdle(App::Application *app) override;
+     virtual void onGlanceUpdate(App::Application *app) override;
      virtual void onGuiResume(App::Application *app) override;
      virtual void onGuiSuspend(App::Application *app) override;
      virtual void onGuiResumeRequest(App::Application *app) override;

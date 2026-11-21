@@ -1889,6 +1889,12 @@ void AppInstance::appMsgHandler(SDK::MessageBase* msg)
 
             mMessageMgr.signalCompletion(msg, SDK::MessageResult::SUCCESS);
 
+            // So the Glances screen hears of it now rather than at its next
+            // poll. After the completion, so the app is not kept waiting.
+            if (mLifeCycleCb && mBase) {
+                mLifeCycleCb->onGlanceUpdate(mBase);
+            }
+
             // The first two only: an app's first update is usually its
             // placeholder and the second its first real value, which is the
             // pair the Glances screen waits for. After the completion, so the

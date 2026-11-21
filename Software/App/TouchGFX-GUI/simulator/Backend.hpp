@@ -10,6 +10,7 @@
 #include "../../../../Libs/Header/Components/App/IconPool.hpp"
 #include "../../../../Libs/Header/Components/SleepMode/SleepSchedule.hpp"
 #include "../../../../Libs/Header/Components/App/GlanceTiming.hpp"
+#include "../../../../Libs/Header/Components/App/GlanceListSignal.hpp"
 
 
 #include "SDK/Glance/GlanceControl.hpp"
@@ -248,7 +249,9 @@ public:
 
                 } else if constexpr (std::is_same_v<T, G2BEvent::UserAppGlancesListReq>) {
                     LOG_DEBUG("Backend. UserAppGlancesListReq\n");
-                    sendGlanceList("request");
+                    if (mGlanceSignal.markDirty()) {
+                        sendGlanceList("request");
+                    }
                 }
             }, data);
         }
@@ -425,6 +428,13 @@ public:
         if (!mGuiTxQueue.empty()) {
             data = mGuiTxQueue.front();
             mGuiTxQueue.pop();
+
+            // As the kernel's Backend does: the GUI taking a glance list is
+            // when the next one may be built, if anything changed since.
+            if (std::holds_alternative<B2GEvent::UserAppGlanceList>(data) &&
+                    mGlanceSignal.delivered()) {
+                sendGlanceList("push");
+            }
             return true;
         }
         return false;
@@ -460,8 +470,9 @@ private:
     //    share and that started with the first of them;
     //  - it sends only what has changed since it last sent;
     //  - every app exits when the screen closes, taking what it sent with it;
-    //  - the GUI sees only the lists it asks for, and they hold only apps that
-    //    are running and have sent something.
+    //  - every report is pushed to the GUI through App::GlanceListSignal, one
+    //    list in flight at a time, and the GUI's own ask goes through it too;
+    //  - a list holds only apps that are running and have sent something.
     // Ticks here are the GUI's, 100 ms each.
     static constexpr uint32_t skGlancesCount    = 3;
     static constexpr uint32_t skGlanceLoadTicks = 2;    // 200 ms per app, a guess
@@ -484,6 +495,7 @@ private:
     uint32_t      mGlanceTimerPhase   = 0;      // tick the shared 1 Hz timer started on
     uint32_t      mGlanceListsSent    = 0;
     MockGlanceApp mGlanceApp[skGlancesCount];
+    App::GlanceListSignal mGlanceSignal;
 
     void glancesOpen()
     {
@@ -491,6 +503,7 @@ private:
         mGlanceTick         = 0;
         mGlanceTimerRunning = false;
         mGlanceListsSent    = 0;
+        mGlanceSignal.reset();
         for (uint32_t i = 0; i < skGlancesCount; ++i) {
             mGlanceApp[i]           = MockGlanceApp{};
             mGlanceApp[i].state     = MockGlanceApp::State::Loading;
@@ -504,6 +517,7 @@ private:
     void glancesClose()
     {
         mGlancesOpen = false;
+        mGlanceSignal.reset();
         for (uint32_t i = 0; i < skGlancesCount; ++i) {
             mGlanceApp[i] = MockGlanceApp{};
             mGlance[i].clearStored();
@@ -524,6 +538,12 @@ private:
                       static_cast<unsigned>(i), static_cast<unsigned>(a.updates),
                       static_cast<unsigned>((mGlanceTick - a.startTick) * skMsPerTick),
                       static_cast<unsigned>(mGlanceTick * skMsPerTick));
+        }
+
+        // The kernel's Backend builds within milliseconds of the report; here
+        // that is this tick, and the GUI sees it on the next, as it would.
+        if (mGlanceSignal.markDirty()) {
+            sendGlanceList("push");
         }
     }
 
@@ -585,6 +605,7 @@ private:
 
     void sendGlanceList(const char *reason)
     {
+        mGlanceSignal.beginBuild();
         std::vector<App::GlanceData> v;
         v.reserve(skGlancesCount);
         for (uint32_t i = 0; i < skGlancesCount; ++i) {

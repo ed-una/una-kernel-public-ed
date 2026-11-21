@@ -155,6 +155,14 @@ public:
     virtual void onGlanceStop(App::Application *app) {}
 
     /**
+     * @brief   Called when a glance app has sent new glance data.
+     * @details Called from the app's own thread, after the data is stored, so
+     *          a receiver that wants it shown carries that to its own thread.
+     * @param   app: pointer to the Application.
+     */
+    virtual void onGlanceUpdate(App::Application *app) {}
+
+    /**
      * @brief   Called when the APP wants to wake up GUI.
      * @note    Backend must manually resume the application
      *          by calling the resume() method.

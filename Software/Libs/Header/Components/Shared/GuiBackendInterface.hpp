@@ -284,6 +284,12 @@ struct WatchFaceStopped {
 struct AppsIdle {
 };
 
+// Internal (Backend-posted, NOT sent by the GUI): a glance app has sent new
+// data, so the Glances screen needs a new list. Carries no PID: one list
+// answers for every app that reported, see App::GlanceListSignal.
+struct AppGlancesChanged {
+};
+
 // Internal (Backend-posted, NOT sent by the GUI): a running service asked for
 // its GUI and it did not fit. Reported from the app's own thread, so the room
 // is made on the Backend thread.
@@ -356,6 +362,7 @@ using Data = std::variant<
 
         WatchFaceStopped,
         AppsIdle,
+        AppGlancesChanged,
         AppGuiDidNotFit
         >;
 };
