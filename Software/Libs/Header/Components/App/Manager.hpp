@@ -161,6 +161,19 @@ private:
     /// GLANCE Frame tick timer
     OS::Timer<Manager> mGlanceTickTimer;
 
+    /// Ticks glances that are still settling (see GlanceTiming::kSettlePeriodMs).
+    /// Runs alongside the 1 Hz timer rather than in place of it, and stops
+    /// itself once no glance is settling.
+    OS::Timer<Manager> mGlanceSettleTimer;
+
+    /// Makes each decision to start or stop a glance timer one step with the
+    /// state it was made from. Apps start their glances on their own threads
+    /// while the timers stop themselves on the timer daemon, so without it a
+    /// timer could be stopped just after another app found it running and did
+    /// not start it. Held only around those decisions. Taken before, never
+    /// while holding, mAppLifecycleMutex.
+    OS::Mutex mGlanceTimerMutex;
+
     /// Guards every cross-thread deref of Application::mApp: the tick/button
     /// dispatch runs on the timer-daemon and DebounceDaemon threads while
     /// create()/destroy() run on the Backend thread. Shared by all apps.
@@ -191,9 +204,11 @@ private:
 
     void guiTickTimCb(void *arg);
     void glanceTickTimCb(void *arg);
+    void glanceSettleTimCb(void *arg);
 
     bool isGuiTimerRequired();
     bool isGlanceTimerRequired();
+    bool isGlanceSettleTimerRequired(uint32_t nowMs);
 
     // LifeCycleCallback
     virtual void onSrvStart(App::Application *app) override;

@@ -43,6 +43,29 @@ inline uint32_t SinceOpenMs(uint32_t nowMs)
     return ElapsedMs(gOpenedAtMs.load(std::memory_order_relaxed), nowMs);
 }
 
+/**
+ * How often a glance is ticked while it settles, and for how long after it
+ * starts.
+ *
+ * A glance is ticked once the moment it starts, and every stock glance app
+ * answers that tick with its placeholder: its sensor value is still queued
+ * behind the tick. At the steady 1 Hz the value then waits up to a second for
+ * the next one. Ticked every 100 ms (one GUI frame) for its first second, it
+ * sends the value a frame after the value arrives. Apps send only what has
+ * changed, so a tick with nothing new costs one message and no more, and none
+ * of the stock apps reads a tick's number or time. The SDK promises glance
+ * ticks are periodic, not that they come once a second.
+ */
+constexpr uint32_t kSettlePeriodMs = 100;
+constexpr uint32_t kSettleWindowMs = 1000;
+
+/// Whether a glance that started at @p startMs is still settling at @p nowMs.
+inline bool InSettleWindow(uint32_t startMs, uint32_t nowMs,
+                           uint32_t windowMs = kSettleWindowMs)
+{
+    return ElapsedMs(startMs, nowMs) < windowMs;
+}
+
 } // namespace GlanceTiming
 } // namespace App
 

@@ -149,6 +149,7 @@ add_executable(una-host-tests
     kernel/EventRouter_test.cpp
     kernel/FaceTilt_test.cpp
     kernel/FramePacer_test.cpp
+    kernel/GlanceSettle_test.cpp
     kernel/GravityTracker_test.cpp
     kernel/PeripheralLinkClients_test.cpp
     kernel/GradeEstimator_test.cpp

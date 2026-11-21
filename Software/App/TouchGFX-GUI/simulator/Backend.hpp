@@ -9,6 +9,7 @@
 #include "../../../../Libs/Header/Components/Shared/GuiBackendInterface.hpp"
 #include "../../../../Libs/Header/Components/App/IconPool.hpp"
 #include "../../../../Libs/Header/Components/SleepMode/SleepSchedule.hpp"
+#include "../../../../Libs/Header/Components/App/GlanceTiming.hpp"
 
 
 #include "SDK/Glance/GlanceControl.hpp"
@@ -452,10 +453,12 @@ private:
     //    give the real figure;
     //  - a started app is ticked once straight away and answers with its
     //    placeholder, because its sensor value is still queued behind that
-    //    tick. The value arrives a tick later;
-    //  - after that it is ticked once a second, by one timer that all glance
-    //    apps share and that started with the first of them, and it sends its
-    //    value on the first of those ticks after the value arrived;
+    //    tick. The value arrives a tick later, and then once a second;
+    //  - for its first second it is ticked every 100 ms, so it sends the value
+    //    on the tick after it arrives (GlanceTiming::kSettlePeriodMs);
+    //  - it is also ticked once a second, by one timer that all glance apps
+    //    share and that started with the first of them;
+    //  - it sends only what has changed since it last sent;
     //  - every app exits when the screen closes, taking what it sent with it;
     //  - the GUI sees only the lists it asks for, and they hold only apps that
     //    are running and have sent something.
@@ -467,11 +470,12 @@ private:
 
     struct MockGlanceApp {
         enum class State { Off, Loading, Running };
-        State    state      = State::Off;
-        uint32_t readyTick  = 0;      // when its load finishes
-        uint32_t startTick  = 0;      // when its glance started
-        bool     valueReady = false;  // its sensor value has arrived
-        uint32_t updates    = 0;      // updates sent since its glance started
+        State    state         = State::Off;
+        uint32_t readyTick     = 0;      // when its load finishes
+        uint32_t startTick     = 0;      // when its glance started
+        uint32_t nextValueTick = 0;      // when its sensor next reports
+        bool     changed       = false;  // a value it has not sent yet
+        uint32_t updates       = 0;      // updates sent since its glance started
     };
 
     bool          mGlancesOpen        = false;
@@ -524,15 +528,12 @@ private:
     }
 
     // EVENT_GLANCE_TICK, as the stock glance apps answer it: they send only
-    // when something changed, so the placeholder first, then the value once
-    // it has arrived (the mock's value is a clock, so it changes every time).
+    // what changed, so the placeholder first, then each value once.
     void glanceTick(uint32_t i)
     {
         MockGlanceApp &a = mGlanceApp[i];
-        if (a.updates == 0) {
-            glanceSend(i);
-        } else if (a.valueReady) {
-            mGlance[i].glanceUpdate();
+        if (a.updates == 0 || a.changed) {
+            a.changed = false;
             glanceSend(i);
         }
     }
@@ -547,8 +548,9 @@ private:
         for (uint32_t i = 0; i < skGlancesCount; ++i) {
             MockGlanceApp &a = mGlanceApp[i];
             if (a.state == MockGlanceApp::State::Loading && mGlanceTick >= a.readyTick) {
-                a.state     = MockGlanceApp::State::Running;
-                a.startTick = mGlanceTick;
+                a.state         = MockGlanceApp::State::Running;
+                a.startTick     = mGlanceTick;
+                a.nextValueTick = mGlanceTick + 1;
                 if (!mGlanceTimerRunning) {
                     mGlanceTimerRunning = true;
                     mGlanceTimerPhase   = mGlanceTick;
@@ -558,8 +560,16 @@ private:
                           static_cast<unsigned>(skGlanceLoadTicks * skMsPerTick),
                           static_cast<unsigned>(mGlanceTick * skMsPerTick));
                 glanceTick(i);    // the kernel's first tick, sent straight away
-            } else if (a.state == MockGlanceApp::State::Running && mGlanceTick > a.startTick) {
-                a.valueReady = true;
+            } else if (a.state == MockGlanceApp::State::Running) {
+                if (mGlanceTick >= a.nextValueTick) {
+                    mGlance[i].glanceUpdate();
+                    a.changed        = true;
+                    a.nextValueTick += skGlanceTickTicks;
+                }
+                if (App::GlanceTiming::InSettleWindow(a.startTick * skMsPerTick,
+                                                      mGlanceTick * skMsPerTick)) {
+                    glanceTick(i);    // a settle tick
+                }
             }
         }
 

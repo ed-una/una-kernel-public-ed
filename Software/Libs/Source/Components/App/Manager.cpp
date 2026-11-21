@@ -11,6 +11,7 @@
 #include "App/Validator.hpp"
 #include "App/AliasRules.hpp"
 #include "App/IconPool.hpp"
+#include "App/GlanceTiming.hpp"
 
 #include <algorithm>
 #include <string>
@@ -42,12 +43,16 @@ Manager::Manager()
         , mWidgetMutex {}
         , mGuiTickTimer {}
         , mGlanceTickTimer {}
+        , mGlanceSettleTimer {}
+        , mGlanceTimerMutex {}
         , mAppLifecycleMutex {}
 {
     mAppLifecycleMutex.init("AppLifecycle");
     mWidgetMutex.init("Widget");
+    mGlanceTimerMutex.init("GlanceTimer");
     mGuiTickTimer.init("AppGuiTick", this, &App::Manager::guiTickTimCb, true, this);
     mGlanceTickTimer.init("AppGlanceTick", this, &App::Manager::glanceTickTimCb, true, this);
+    mGlanceSettleTimer.init("AppGlanceSettle", this, &App::Manager::glanceSettleTimCb, true, this);
     HWButtons::GetInstance().attachCallback(this);
 }
 
@@ -871,9 +876,33 @@ void Manager::glanceTickTimCb(void *arg)
         app.dispatchGlanceTick(timestamp);
     }
 
+    OS::MutexCS cs(mGlanceTimerMutex);
     if (!isGlanceTimerRequired() && mGlanceTickTimer.isRunning()) {
         mGlanceTickTimer.stop();
         LOG_DEBUG("Glance timer deactivated\n");
+    }
+}
+
+void Manager::glanceSettleTimCb(void *arg)
+{
+    const uint32_t timestamp = OS::GetTimeMs();
+    bool settling = false;
+    for (auto &app : mApps) {
+        if (app.dispatchGlanceSettleTick(timestamp)) {
+            settling = true;
+        }
+    }
+    if (settling) {
+        return;
+    }
+
+    // Asked again under the lock rather than trusting the walk above: a glance
+    // that started after the walk has found this timer running and left it to
+    // tick for it.
+    OS::MutexCS cs(mGlanceTimerMutex);
+    if (!isGlanceSettleTimerRequired(OS::GetTimeMs()) && mGlanceSettleTimer.isRunning()) {
+        mGlanceSettleTimer.stop();
+        LOG_DEBUG("Glance settle timer deactivated\n");
     }
 }
 
@@ -895,6 +924,16 @@ bool Manager::isGlanceTimerRequired()
 {
     for (auto &app : mApps) {
         if (app.isType(App::Type::kGlance) && app.isGlanceRun()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Manager::isGlanceSettleTimerRequired(uint32_t nowMs)
+{
+    for (auto &app : mApps) {
+        if (app.isType(App::Type::kGlance) && app.isGlanceSettling(nowMs)) {
             return true;
         }
     }
@@ -1045,11 +1084,20 @@ void Manager::onGuiSuspend(App::Application *app)
     }
 }
 
+// Runs on the starting app's own thread, after its glance has started and been
+// ticked once (AppInstance::runGlc()).
 void Manager::onGlanceRun(App::Application *app)
 {
-    if (!mGlanceTickTimer.isRunning()) {
-        LOG_DEBUG("Glance timer activated\n");
-        mGlanceTickTimer.start(1000/App::kGlanceRate);
+    {
+        OS::MutexCS cs(mGlanceTimerMutex);
+        if (!mGlanceTickTimer.isRunning()) {
+            LOG_DEBUG("Glance timer activated\n");
+            mGlanceTickTimer.start(1000/App::kGlanceRate);
+        }
+        if (!mGlanceSettleTimer.isRunning()) {
+            LOG_DEBUG("Glance settle timer activated\n");
+            mGlanceSettleTimer.start(GlanceTiming::kSettlePeriodMs);
+        }
     }
 
     if (mLifeCycleCb) {
@@ -1059,9 +1107,14 @@ void Manager::onGlanceRun(App::Application *app)
 
 void Manager::onGlanceStop(App::Application *app)
 {
-    if (!isGlanceTimerRequired() && mGlanceTickTimer.isRunning()) {
-        mGlanceTickTimer.stop();
-        LOG_DEBUG("Glance timer deactivated\n");
+    // The settle timer is left to stop itself: within a tick it finds no
+    // glance settling, this one included.
+    {
+        OS::MutexCS cs(mGlanceTimerMutex);
+        if (!isGlanceTimerRequired() && mGlanceTickTimer.isRunning()) {
+            mGlanceTickTimer.stop();
+            LOG_DEBUG("Glance timer deactivated\n");
+        }
     }
 
     if (mLifeCycleCb) {

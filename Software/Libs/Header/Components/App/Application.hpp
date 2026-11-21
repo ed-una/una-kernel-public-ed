@@ -252,6 +252,13 @@ public:
     bool isGlanceRun() const { return mSrvState == AppPartState::GLANCE; }
 
     /**
+     * @brief   Whether the glance is running and still inside the first
+     *          GlanceTiming::kSettleWindowMs after it started, when it is
+     *          ticked faster than once a second.
+     */
+    bool isGlanceSettling(uint32_t nowMs) const;
+
+    /**
      * @brief   Whether a lifecycle request is still queued or being handled.
      */
     bool hasPendingRequests() const { return mRequestsInFlight.load() != 0; }
@@ -340,7 +347,10 @@ protected:
     OS::Thread<App::AppInstance, 4*1024> mThread;
 
     uint32_t mGuiTickNumber;
-    uint32_t mGlanceTickNumber;
+
+    /// Atomic because a glance is ticked from two threads: once from its own
+    /// app thread as it starts (runGlc()), then from the timer daemon.
+    std::atomic<uint32_t> mGlanceTickNumber;
     uint32_t mStartGuiTime;
 
     /// When the kernel asked for the glance to run, so the app thread can say
@@ -349,11 +359,14 @@ protected:
     /// GlanceTiming lines.
     std::atomic<uint32_t> mGlanceRunRequestMs {0};
 
-    /// When the glance last started, and how many updates the app has sent
-    /// since: the first update is usually a placeholder, the second its first
-    /// real value, and the time to each is what the Glances screen waits for.
-    /// App thread only.
-    uint32_t mGlanceStartMs = 0;
+    /// When the glance last started. Written on the app thread, read by the
+    /// timer daemon to decide whether the glance is still settling, hence
+    /// atomic.
+    std::atomic<uint32_t> mGlanceStartMs {0};
+
+    /// Updates the app has sent since its glance started: the first is
+    /// usually a placeholder, the second its first real value, and the time
+    /// to each is what the Glances screen waits for. App thread only.
     uint32_t mGlanceUpdates = 0;
 
     enum class AppPartState {
@@ -550,6 +563,7 @@ public:
     bool isGuiRun() const;
     bool isGuiResumed() const;
     bool isGlanceRun() const;
+    bool isGlanceSettling(uint32_t nowMs) const;
 
     // Temporary for testing
     bool create();
@@ -595,6 +609,10 @@ private:
     // destroy(), closing the use-after-free window on the raw instance pointer.
     void dispatchFrameTick(uint32_t timestamp);
     void dispatchGlanceTick(uint32_t timestamp);
+
+    /// The extra tick a settling glance gets. Glances only, unlike
+    /// dispatchGlanceTick(). Returns whether the glance is still settling.
+    bool dispatchGlanceSettleTick(uint32_t timestamp);
     void dispatchButton(uint32_t timestamp,
                         SDK::Message::EventButton::Id id,
                         SDK::Message::EventButton::Event event);

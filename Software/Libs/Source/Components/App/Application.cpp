@@ -247,6 +247,12 @@ bool Application::isGlanceRun() const
     return mApp != nullptr && mApp->isGlanceRun();
 }
 
+bool Application::isGlanceSettling(uint32_t nowMs) const
+{
+    OS::MutexCS cs(*mpLifecycleMutex);
+    return mApp != nullptr && mApp->isGlanceSettling(nowMs);
+}
+
 bool Application::create()
 {
     if (mApp != nullptr) {
@@ -372,6 +378,19 @@ void Application::dispatchGlanceTick(uint32_t timestamp)
     if (mApp != nullptr && mApp->isSrvRun()) {
         mApp->onGlanceTick(timestamp);
     }
+}
+
+bool Application::dispatchGlanceSettleTick(uint32_t timestamp)
+{
+    // Glances only: these ticks are there to get a starting glance's first
+    // value on screen, and a service that is not showing a glance has nothing
+    // to show sooner.
+    OS::MutexCS cs(*mpLifecycleMutex);
+    if (mApp == nullptr || !mApp->isGlanceSettling(timestamp)) {
+        return false;
+    }
+    mApp->onGlanceTick(timestamp);
+    return true;
 }
 
 void Application::dispatchButton(uint32_t timestamp,
@@ -821,15 +840,21 @@ void AppInstance::onFrameTick(uint32_t timestamp)
 void AppInstance::onGlanceTick(uint32_t timestamp)
 {
     if (isSrvRun()) {
+        const uint32_t frameNumber = mGlanceTickNumber.fetch_add(1, std::memory_order_relaxed);
         auto* msg = mMessageMgr.allocateMessage<SDK::Message::EventGlanceTick>();
         if (msg) {
             msg->timestamp = timestamp;
-            msg->frameNumber = mGlanceTickNumber;
+            msg->frameNumber = frameNumber;
             mAppComm.sendToService(msg);
             mMessageMgr.releaseMessage(msg);
         }
-        mGlanceTickNumber++;
     }
+}
+
+bool AppInstance::isGlanceSettling(uint32_t nowMs) const
+{
+    return isGlanceRun() &&
+           GlanceTiming::InSettleWindow(mGlanceStartMs.load(std::memory_order_relaxed), nowMs);
 }
 
 void AppInstance::onGlanceStop()
@@ -1251,7 +1276,10 @@ bool AppInstance::runGlc()
     bool result = false;
     LOG_DEBUG("[%s] Glance activating...\n", mInfo.name);
 
-    mGlanceStartMs = OS::GetTimeMs();
+    // Before the state says GLANCE, so the timer daemon never sees a running
+    // glance with the last visit's start time. Relaxed is enough even if it
+    // did: one settle tick more or less is all it could change.
+    mGlanceStartMs.store(OS::GetTimeMs(), std::memory_order_relaxed);
     mGlanceUpdates = 0;
 
     auto* msg = mMessageMgr.allocateMessage<SDK::Message::EventGlanceStart>();
@@ -1870,7 +1898,8 @@ void AppInstance::appMsgHandler(SDK::MessageBase* msg)
                 const uint32_t nowMs = OS::GetTimeMs();
                 GLANCE_TIMING_LOG("[%s] update #%lu: %lu ms after run, t+%lu\n",
                         mInfo.name, static_cast<unsigned long>(updates),
-                        static_cast<unsigned long>(GlanceTiming::ElapsedMs(mGlanceStartMs, nowMs)),
+                        static_cast<unsigned long>(GlanceTiming::ElapsedMs(
+                                mGlanceStartMs.load(std::memory_order_relaxed), nowMs)),
                         static_cast<unsigned long>(GlanceTiming::SinceOpenMs(nowMs)));
             }
         } break;
