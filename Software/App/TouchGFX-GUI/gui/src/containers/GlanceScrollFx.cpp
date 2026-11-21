@@ -137,7 +137,7 @@ const char* GlanceScrollFx::variantName(Variant v)
         case kPixelBreak: return "pixel break-up";
         case kDitherWipe: return "dithered wipe";
         case kCubeBuild:  return "cube build";
-        case kCubeBlend:  return "cubes under the names";
+        case kCubeBlend:  return "centre cubes";
         default:          return "?";
     }
 }
@@ -174,13 +174,15 @@ void GlanceScrollFx::start(int8_t direction)
     invalidate();
 }
 
-void GlanceScrollFx::startBlend(int8_t direction, uint8_t frames)
+void GlanceScrollFx::startBlend(int8_t direction, uint8_t frames, bool settleInPlace, uint8_t logAs)
 {
     if (mVariant != kCubeBlend || isBusy() || frames == 0) {
         return;
     }
     mDirection = (direction < 0) ? -1 : 1;
     mFrames = (frames > kMaxFxFrames) ? kMaxFxFrames : frames;
+    mSettleInPlace = settleInPlace;
+    mLogAs = logAs;
     mStep = 1;
     mDrawnStep = 0;
     std::fill(std::begin(mStepUs), std::end(mStepUs), 0u);
@@ -240,7 +242,8 @@ void GlanceScrollFx::logCost() const
 {
     // Numbered as Gui::Config::kGlancesScrollFx numbers them: the cubes under
     // the names are variant 5's.
-    const unsigned shown = (mVariant == kCubeBlend) ? 5u : static_cast<unsigned>(mVariant);
+    const unsigned shown = (mVariant == kCubeBlend) ? (mLogAs ? mLogAs : 5u)
+                                                    : static_cast<unsigned>(mVariant);
     if (mFrames >= 3) {
         LOG_DEBUG("GlanceFx: variant %u (%s): frame 1 drew in %lu us, frame 2 in %lu us, "
                   "frame 3 in %lu us, last clean copy %lu us\n",
@@ -421,6 +424,14 @@ void GlanceScrollFx::drawCubeBlend(uint8_t* origin, int32_t stride, const Rect& 
     fill(origin, stride, clip, kBlack);
     if (mStep == 1) {
         paintCubes(origin, stride, clip, mOldCells, -mDirection, true);
+    } else if (mSettleInPlace && mFrames >= 3) {
+        // Variant 6: short of their places, then in place, as variant 3's
+        // cubes arrive.
+        if (mStep == mFrames - 1) {
+            paintCubes(origin, stride, clip, mNewCells, mDirection, true);
+        } else if (mStep == mFrames) {
+            paintCubes(origin, stride, clip, mNewCells, 0, true);
+        }
     } else if (mStep == mFrames) {
         paintCubes(origin, stride, clip, mNewCells, mDirection, true);
     }

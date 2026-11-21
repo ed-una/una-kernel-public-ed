@@ -23,40 +23,44 @@ GlanceOrbitFx::GlanceOrbitFx()
 
 void GlanceOrbitFx::initialize()
 {
-    // Everything in this container's coordinates: the wheel's area from
-    // (kX, kY). The bands stop short of the separator lines (y 79 to 81 and
-    // 159 to 161 on screen), which stay visible under the moving names, and
-    // start at x 37: at those heights the side bar's rail curves in as far as
-    // x 34 and its handle's tip to x 35. A centred name up to 166 px wide is
-    // still covered (the longest installed one is about 130 px at this
-    // size). Beside the centre item the side bar stays left of x 22.
-    const touchgfx::colortype black = touchgfx::Color::getColorFromRGB(0, 0, 0);
-    const int16_t bandX = 37 - kX;
-    mStart.setPosition(0, 0, kWidth, kHeight);
-    mTopBand.setPosition(bandX, 0, kWidth - bandX, 79 - kY);
-    mCentreBox.setPosition(0, 82 - kY, kWidth, 159 - 82);
-    mBottomBand.setPosition(bandX, 162 - kY, kWidth - bandX, kHeight - (162 - kY));
-    mTopBand.setColor(black);
-    mCentreBox.setColor(black);
-    mBottomBand.setColor(black);
-    mEnd.setPosition(0, 0, kWidth, kHeight);
+    // Three regions, in screen pixels. They stop short of the separator
+    // lines (y 79 to 81 and 159 to 161), which stay visible and which no
+    // name is drawn over. The bands start at x 37: at those heights the side
+    // bar's rail curves in as far as x 34 and its handle's tip to x 35. A
+    // centred name up to 166 px wide still fits (the longest installed one is
+    // about 130 px at this size). Beside the centre item the side bar stays
+    // left of x 22. The wheel's area ends at y 198.
+    mRegions[kTop].screen    = Rect(37, kY, kX + kWidth - 37, 79 - kY);
+    mRegions[kCentre].screen = Rect(kX, 82, kWidth, 159 - 82);
+    mRegions[kBottom].screen = Rect(37, 162, kX + kWidth - 37, kY + kHeight - 162);
 
+    const touchgfx::colortype black = touchgfx::Color::getColorFromRGB(0, 0, 0);
+    mStart.setPosition(0, 0, kWidth, kHeight);
     add(mStart);
-    add(mTopBand);
-    add(mCentreBox);
-    add(mBottomBand);
-    for (int i = 0; i < kRows; ++i) {
-        mRows[i].setVisible(false);
-        add(mRows[i]);
+    for (Region& r : mRegions) {
+        r.clip.setPosition(r.screen.x - kX, r.screen.y - kY, r.screen.width, r.screen.height);
+        r.background.setPosition(0, 0, r.screen.width, r.screen.height);
+        r.background.setColor(black);
+        r.clip.add(r.background);
+        for (int i = 0; i < kRows; ++i) {
+            r.rows[i].setVisible(false);
+            r.clip.add(r.rows[i]);
+        }
+        add(r.clip);
     }
+    mEnd.setPosition(0, 0, kWidth, kHeight);
     add(mEnd);
 
+    setMode(Mode::kNamesOverBox);
     setVisible(false);
 }
 
-void GlanceOrbitFx::setCentreBox(bool on)
+void GlanceOrbitFx::setMode(Mode mode)
 {
-    mCentreBox.setVisible(on);
+    mMode = mode;
+    // The centre's black box hides the wheel's new content; variants 5 and
+    // 6 draw cubes there instead, under this container.
+    mRegions[kCentre].background.setVisible(mode == Mode::kNamesOverBox);
 }
 
 void GlanceOrbitFx::setSteps(uint8_t steps)
@@ -129,28 +133,47 @@ void GlanceOrbitFx::tick()
 void GlanceOrbitFx::layout()
 {
     const float scroll = mDirection * static_cast<float>(mStep) / static_cast<float>(mSteps);
-    int used = 0;
-    for (int8_t k = -kReach; k <= kReach && used < kRows; ++k) {
+    int used[kRegions] = {};
+    for (int8_t k = -kReach; k <= kReach; ++k) {
         const float d = static_cast<float>(k) - scroll;
         const float ad = std::fabs(d);
         if (ad >= 2.0f) {
             continue;   // past the wheel's area
         }
         const OrbitTiers::LabelTier& tier = OrbitTiers::pickTier(ad);
-        touchgfx::TextAreaWithOneWildcard& row = mRows[used++];
-        row.setWildcard(mNames[k + kReach]);
-        row.setTypedText(touchgfx::TypedText(tier.fontCentred));
-        row.setColor(tier.color);
+
         // Centred on the row exactly as MenuGlancesItem::setOrbitStyle()
         // centres a resting name, so the hand-over at d = +/-1 is seamless.
+        mMeasure.setWildcard(mNames[k + kReach]);
+        mMeasure.setTypedText(touchgfx::TypedText(tier.fontCentred));
+        mMeasure.setPosition(0, 0, kNameW, kRowPitch);
+        mMeasure.resizeHeightToCurrentText();
+        const int16_t h = mMeasure.getHeight();
         const int16_t rowTop = static_cast<int16_t>(std::lround(kCentreRowTop + d * kRowPitch));
-        row.setPosition(kNameX - kX, 0, kNameW, kRowPitch);
-        row.resizeHeightToCurrentText();
-        row.setY(static_cast<int16_t>(rowTop + (kRowPitch - row.getHeight()) / 2 - kY));
-        row.setVisible(true);
+        const Rect text(kNameX, static_cast<int16_t>(rowTop + (kRowPitch - h) / 2), kNameW, h);
+
+        // The name in every region it reaches, each copy clipped by its
+        // region: cut at a separator line, never drawn over it.
+        for (int r = 0; r < kRegions; ++r) {
+            if (r == kCentre && mMode == Mode::kNamesInBands) {
+                continue;
+            }
+            Region& region = mRegions[r];
+            if (!text.intersect(region.screen) || used[r] >= kRows) {
+                continue;
+            }
+            touchgfx::TextAreaWithOneWildcard& row = region.rows[used[r]++];
+            row.setWildcard(mNames[k + kReach]);
+            row.setTypedText(touchgfx::TypedText(tier.fontCentred));
+            row.setColor(tier.color);
+            row.setPosition(text.x - region.screen.x, text.y - region.screen.y, text.width, text.height);
+            row.setVisible(true);
+        }
     }
-    for (int i = used; i < kRows; ++i) {
-        mRows[i].setVisible(false);
+    for (int r = 0; r < kRegions; ++r) {
+        for (int i = used[r]; i < kRows; ++i) {
+            mRegions[r].rows[i].setVisible(false);
+        }
     }
 }
 

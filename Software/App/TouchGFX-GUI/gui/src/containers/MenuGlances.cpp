@@ -62,15 +62,18 @@ void MenuGlances::setScrollVariant(uint8_t variant)
     mScrollFx.cancel();
     mOrbitFx.cancel();
 
-    // 1 to 3 are GlanceScrollFx's own; 5 uses its cubes under the names.
+    // 1 to 3 are GlanceScrollFx's own; 5 and 6 use its cubes in the centre,
+    // 5 under the names, 6 with the names kept to the neighbour bands.
     GlanceScrollFx::Variant fx = GlanceScrollFx::kNone;
     if (mScrollVariant >= 1 && mScrollVariant <= 3) {
         fx = static_cast<GlanceScrollFx::Variant>(mScrollVariant);
-    } else if (mScrollVariant == 5) {
+    } else if (mScrollVariant == 5 || mScrollVariant == 6) {
         fx = GlanceScrollFx::kCubeBlend;
     }
     mScrollFx.setVariant(fx);
-    mOrbitFx.setCentreBox(mScrollVariant == 4);
+    mOrbitFx.setMode(mScrollVariant == 4 ? GlanceOrbitFx::Mode::kNamesOverBox
+                   : mScrollVariant == 5 ? GlanceOrbitFx::Mode::kNamesOverCubes
+                                         : GlanceOrbitFx::Mode::kNamesInBands);
 
     // The resting names take the Track menu's distance-1 tier, so the scroll
     // hands over to them without a change (update() restyles every row).
@@ -79,7 +82,7 @@ void MenuGlances::setScrollVariant(uint8_t variant)
 
 bool MenuGlances::isOrbitScroll() const
 {
-    return mScrollVariant == 4 || mScrollVariant == 5;
+    return mScrollVariant >= 4 && mScrollVariant <= 6;
 }
 
 bool MenuGlances::isScrolling() const
@@ -89,7 +92,7 @@ bool MenuGlances::isScrolling() const
 
 void MenuGlances::tickScrollFx()
 {
-    if (mScrollVariant == 5) {
+    if (mScrollVariant == 5 || mScrollVariant == 6) {
         // The names set the pace; the cubes follow them step for step.
         mOrbitFx.tick();
         mScrollFx.followStep(mOrbitFx.getStep());
@@ -104,6 +107,7 @@ void MenuGlances::cycleScrollFx()
     static const char* const kNames[kScrollVariants] = {
         "wheel (today)", "pixel break-up", "dithered wipe", "cube build",
         "Track-menu names", "Track-menu names with cubes",
+        "Track-menu names in the bands, cubes in the centre",
     };
     setScrollVariant(static_cast<uint8_t>((mScrollVariant + 1) % kScrollVariants));
     LOG_DEBUG("GlanceFx: variant %u, %s\n", static_cast<unsigned>(mScrollVariant),
@@ -260,7 +264,7 @@ void MenuGlances::scrollBy(int8_t direction)
     if (isOrbitScroll()) {
         // As below: the wheel jumps, and a press while a scroll is still on
         // screen gets no motion at all, only the next item drawn clean.
-        // Variant 5 also waits for its cube layer's clean copy.
+        // Variants 5 and 6 also wait for the cube layer's clean copy.
         if (mOrbitFx.isRunning() || mScrollFx.isBusy()) {
             mOrbitFx.cancel();
             mScrollFx.cancel();
@@ -268,8 +272,9 @@ void MenuGlances::scrollBy(int8_t direction)
         } else {
             loadOrbitNames(from);
             mOrbitFx.start(direction);
-            if (mScrollVariant == 5) {
-                mScrollFx.startBlend(direction, static_cast<uint8_t>(mOrbitFx.getSteps() - 1));
+            if (mScrollVariant == 5 || mScrollVariant == 6) {
+                mScrollFx.startBlend(direction, static_cast<uint8_t>(mOrbitFx.getSteps() - 1),
+                                     mScrollVariant == 6, mScrollVariant);
             }
             sideBar.animateToId(p, mOrbitFx.getSteps());
         }

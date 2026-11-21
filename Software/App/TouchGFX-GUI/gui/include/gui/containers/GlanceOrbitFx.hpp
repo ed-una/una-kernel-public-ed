@@ -2,6 +2,7 @@
 #define GLANCEORBITFX_HPP
 
 #include <touchgfx/containers/Container.hpp>
+#include <touchgfx/hal/Types.hpp>
 #include <touchgfx/widgets/Box.hpp>
 #include <touchgfx/widgets/TextAreaWithWildcard.hpp>
 #include <touchgfx/widgets/Widget.hpp>
@@ -24,10 +25,13 @@
  *          distance-1 tier (MenuGlancesItem::setOrbitStyle()) so nothing
  *          changes at the hand-over.
  *
+ *          Names are drawn in three regions, the two neighbour bands and the
+ *          centre window, each clipping what it holds, so a name crossing a
+ *          teal separator line is cut at the line rather than drawn over it.
  *          The separator lines, the side arcs and the button marks are never
  *          covered. A glance's own content is not moved or scaled: it appears
- *          when the scroll settles. Variant 5 leaves the centre box off, and
- *          GlanceScrollFx draws cubes there instead, below these names.
+ *          when the scroll settles. See Mode for what each variant puts in
+ *          the centre.
  */
 class GlanceOrbitFx : public touchgfx::Container
 {
@@ -54,8 +58,13 @@ public:
     /// Build the children. Call once, after setting the position.
     void initialize();
 
-    /// The black box over the centre item: on for variant 4, off for 5.
-    void setCentreBox(bool on);
+    /// What the centre window shows during a scroll.
+    enum class Mode : uint8_t {
+        kNamesOverBox,      ///< variant 4: names; a black box hides the content
+        kNamesOverCubes,    ///< variant 5: names over GlanceScrollFx's cubes
+        kNamesInBands,      ///< variant 6: no names; the centre is the cubes'
+    };
+    void setMode(Mode mode);
 
     /// Frames per scroll, settled frame included (OrbitMenu's animation
     /// steps). Takes effect on the next scroll.
@@ -96,17 +105,27 @@ private:
     };
 
     static constexpr uint8_t kMaxSteps = 4;
-    static constexpr int kRows = 4;     ///< at most four names in view at once
+    static constexpr int kRows = 4;     ///< at most four names in a region at once
+
+    /// One clipping region: a black background and the names in it.
+    struct Region {
+        touchgfx::Container clip;       ///< its children are clipped to it
+        touchgfx::Box background;
+        touchgfx::TextAreaWithOneWildcard rows[kRows];
+        touchgfx::Rect screen;          ///< where it is, in screen pixels
+    };
+    enum { kTop = 0, kCentre = 1, kBottom = 2, kRegions = 3 };
 
     void layout();
     void logCost() const;
 
     Mark mStart;
-    touchgfx::Box mTopBand;
-    touchgfx::Box mCentreBox;
-    touchgfx::Box mBottomBand;
-    touchgfx::TextAreaWithOneWildcard mRows[kRows];
+    Region mRegions[kRegions];
     Mark mEnd;
+
+    /// Not on screen: sizes a name in a tier's font before it is placed.
+    touchgfx::TextAreaWithOneWildcard mMeasure;
+    Mode mMode = Mode::kNamesOverBox;
 
     touchgfx::Unicode::UnicodeChar mNames[2 * kReach + 1][kNameLen] = {};
 

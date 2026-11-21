@@ -93,12 +93,17 @@ public:
     void start(int8_t direction);
 
     /**
-     * @brief   Start variant 5's centre for one press.
+     * @brief   Start variant 5's or 6's centre for one press.
      * @param   frames: in-between frames of the scroll it goes with (2 or 3).
+     * @param   settleInPlace: with 3 frames, land the incoming cubes short of
+     *          their places on frame 2 and in place on frame 3 (variant 6),
+     *          rather than leave frame 2 empty and land them on frame 3
+     *          (variant 5). With 2 frames both land them on frame 2.
+     * @param   logAs: the variant number for the GlanceFx line.
      * @note    Only for kCubeBlend, and only when !isBusy(). The steps then
      *          follow GlanceOrbitFx (followStep()), not tick().
      */
-    void startBlend(int8_t direction, uint8_t frames);
+    void startBlend(int8_t direction, uint8_t frames, bool settleInPlace, uint8_t logAs);
 
     /// Take GlanceOrbitFx's step (0 ends). kCubeBlend only.
     void followStep(uint8_t step);
@@ -126,6 +131,8 @@ private:
     uint8_t mStep = 0;          ///< 0 idle, 1..mFrames the frame to draw
     uint8_t mFrames = kFxFrames;
     int8_t mDirection = 1;
+    bool mSettleInPlace = false;    ///< see startBlend()
+    uint8_t mLogAs = 0;             ///< see startBlend(); 0: mVariant
 
     /// Variant 5: each 10 px cell's colour (0 for no ink), of the outgoing
     /// content (from mClean, at the press) and of the incoming one (read in

@@ -93,7 +93,7 @@ protected:
     GlanceOrbitFx mOrbitFx;
 
     /// Gui::Config::kGlancesScrollFx, or what the simulator's v key chose.
-    static constexpr uint8_t kScrollVariants = 6;
+    static constexpr uint8_t kScrollVariants = 7;
     uint8_t mScrollVariant = 0;
 
     void setScrollVariant(uint8_t variant);
