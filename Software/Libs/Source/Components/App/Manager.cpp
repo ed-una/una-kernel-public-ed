@@ -792,12 +792,13 @@ void Manager::stopAll()
 uint32_t Manager::startGlances()
 {
     LOG_INFO("Start all glances\n");
+    // Counted whatever runGlance() returns: without a timeout it does not wait
+    // for the app to answer, so its result never says the app was asked.
     uint32_t asked = 0;
     for (auto &app : mApps) {
         if (app.getType() == App::Type::kGlance) {
-            if (app.runGlance()) {
-                asked++;
-            }
+            app.runGlance();
+            asked++;
         }
     }
     return asked;
