@@ -229,6 +229,17 @@ public:
     bool appGlancesStart();
     bool appGlancesStop();
     bool appGlancesUpdate();
+
+    /**
+     * @brief   The last glance list the kernel sent, kept between visits.
+     * @details The Glances screen draws it on the frame it opens, before the
+     *          kernel's first list can arrive: the glance apps are still
+     *          loading then, and that takes long enough to see. Safe to draw
+     *          after the apps have exited: every image in it points at the
+     *          kernel's own copy of the pixels, which the list keeps alive.
+     * @retval  The list, or null before the first visit.
+     */
+    std::shared_ptr<std::vector<App::GlanceData>> getLastGlanceList() const { return mLastGlanceList; }
     bool appResume();
     void appPause();
     void appStopAll();
@@ -429,6 +440,9 @@ protected:
 
     /// Which value the shared clock "FORMAT" picker currently edits (see setClockPickerDate).
     bool mClockPickerDate = false;
+
+    /// See getLastGlanceList().
+    std::shared_ptr<std::vector<App::GlanceData>> mLastGlanceList;
 
     /// The day the sleep window editor edits (see setSleepEditDay).
     uint8_t mSleepEditDay = 0;

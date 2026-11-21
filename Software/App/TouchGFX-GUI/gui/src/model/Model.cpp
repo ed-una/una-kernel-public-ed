@@ -1898,6 +1898,7 @@ void Model::onDataEvent(const B2GEvent::UserAppCapabilities &evt)
 void Model::onDataEvent(const B2GEvent::UserAppGlanceList &evt)
 {
     LOG_DEBUG("UserAppGlanceList [len = %u]\n", evt.list->size());
+    mLastGlanceList = evt.list;
     modelListener->onAppGlanceList(evt.list);
 }
 

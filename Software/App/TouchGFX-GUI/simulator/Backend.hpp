@@ -11,6 +11,8 @@
 #include "../../../../Libs/Header/Components/SleepMode/SleepSchedule.hpp"
 #include "../../../../Libs/Header/Components/App/GlanceTiming.hpp"
 #include "../../../../Libs/Header/Components/App/GlanceListSignal.hpp"
+#include "../../../../Libs/Header/Components/App/GlanceCache.hpp"
+#include "../../../../Libs/Header/Components/App/GlanceSelect.hpp"
 
 
 #include "SDK/Glance/GlanceControl.hpp"
@@ -472,7 +474,11 @@ private:
     //  - every app exits when the screen closes, taking what it sent with it;
     //  - every report is pushed to the GUI through App::GlanceListSignal, one
     //    list in flight at a time, and the GUI's own ask goes through it too;
-    //  - a list holds only apps that are running and have sent something.
+    //  - what each app contributes to a list is App::SelectGlance()'s answer:
+    //    live, its values from the last visit while it starts (the kernel
+    //    keeps them, App::CachedGlance), or its name alone on the first visit.
+    //    The kernel copies the icons when they are sent (CopyGlanceImages),
+    //    as the watch does, so a list never points into an app.
     // Ticks here are the GUI's, 100 ms each.
     static constexpr uint32_t skGlancesCount    = 3;
     static constexpr uint32_t skGlanceLoadTicks = 2;    // 200 ms per app, a guess
@@ -496,6 +502,7 @@ private:
     uint32_t      mGlanceListsSent    = 0;
     MockGlanceApp mGlanceApp[skGlancesCount];
     App::GlanceListSignal mGlanceSignal;
+    App::CachedGlance     mGlanceCache[skGlancesCount];   // outlives the visit
 
     void glancesOpen()
     {
@@ -608,10 +615,39 @@ private:
         mGlanceSignal.beginBuild();
         std::vector<App::GlanceData> v;
         v.reserve(skGlancesCount);
+        unsigned live = 0, cached = 0, placeholder = 0;
         for (uint32_t i = 0; i < skGlancesCount; ++i) {
-            if (mGlanceApp[i].state == MockGlanceApp::State::Running &&
-                    mGlance[i].stored().count > 0) {
-                v.push_back(mGlance[i].stored());
+            const MockGlanceApp &a = mGlanceApp[i];
+            const App::GlanceData &stored = mGlance[i].stored();
+
+            App::GlanceInputs in;
+            in.requested     = mGlancesOpen;
+            in.alive         = a.state != MockGlanceApp::State::Off;
+            in.glanceRunning = a.state == MockGlanceApp::State::Running;
+            in.updates       = a.updates;
+            in.hasData       = stored.count > 0;
+            in.msSinceStart  = (mGlanceTick - a.startTick) * skMsPerTick;
+            in.hasCache      = mGlanceCache[i].valid();
+
+            switch (App::SelectGlance(in)) {
+                case App::GlanceSource::kLive:
+                    mGlanceCache[i].store(stored);
+                    v.push_back(stored);
+                    live++;
+                    break;
+                case App::GlanceSource::kCached:
+                    v.push_back(mGlanceCache[i].expand(mGlance[i].name(), mGlance[i].pid()));
+                    cached++;
+                    break;
+                case App::GlanceSource::kPlaceholder: {
+                    App::GlanceData d{};
+                    snprintf(d.altname, sizeof(d.altname), "%s", mGlance[i].name());
+                    d.pid = mGlance[i].pid();
+                    v.push_back(d);
+                    placeholder++;
+                } break;
+                case App::GlanceSource::kOmit:
+                    break;
             }
         }
 
@@ -619,9 +655,10 @@ private:
         rsp.list = std::make_shared<std::vector<App::GlanceData>>(v);
         sendToGui(rsp);
 
-        LOG_DEBUG("GlanceTiming: [mock kernel] list #%u (%s): %u items, t+%u\n",
+        LOG_DEBUG("GlanceTiming: [mock kernel] list #%u (%s): %u items "
+                  "(live %u, cached %u, placeholder %u), t+%u\n",
                   static_cast<unsigned>(++mGlanceListsSent), reason,
-                  static_cast<unsigned>(v.size()),
+                  static_cast<unsigned>(v.size()), live, cached, placeholder,
                   static_cast<unsigned>(mGlanceTick * skMsPerTick));
     }
 
@@ -707,7 +744,7 @@ private:
         for (uint32_t i = 0; i < skGlancesCount; ++i) {
             char tmpName[App::kNameLen]{};
             snprintf(tmpName, App::kNameLen, "glance_%u", i);
-            mGlance[i].createGlance(tmpName);
+            mGlance[i].createGlance(tmpName, 100 + i);
         }
 
         // Daily health
@@ -959,8 +996,16 @@ private:
         GlanceProvider(){}
 
         // What the kernel holds: a copy taken when the app last sent.
-        void store() { mStored = getData(); }
+        // As the kernel stores an update: a copy, icons included.
+        void store()
+        {
+            App::GlanceData d = getData();
+            App::CopyGlanceImages(d, mStored.pixels);
+            mStored = d;
+        }
         void clearStored() { mStored = App::GlanceData{}; }
+        const char *name() const { return mAltName; }
+        uint32_t pid() const { return mPid; }
         const App::GlanceData &stored() const { return mStored; }
 
         // What a stock glance shows before its sensor value arrives.
@@ -977,6 +1022,7 @@ private:
                 d.ctrls[i] = mUI.data()[i];
             }
             snprintf(d.altname, sizeof(d.altname), mAltName);
+            d.pid = mPid;
 
             return d;
         }
@@ -998,8 +1044,9 @@ private:
         }
 
 
-        void createGlance(const char* name)
+        void createGlance(const char* name, uint32_t pid)
         {
+            mPid = pid;
             GlanceProvider& data = *this;
             snprintf(data.mAltName, sizeof(data.mAltName), name);
 
@@ -1056,6 +1103,7 @@ private:
 
     private:
         char mAltName[App::kNameLen]{};
+        uint32_t mPid = 0;
         SDK::Glance::Form mUI{ 240, 60 };
         SDK::Glance::ControlText mTextTime;
         SDK::Glance::ControlText mTextTemperature;

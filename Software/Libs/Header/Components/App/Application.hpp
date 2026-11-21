@@ -26,6 +26,7 @@
 #include "App/FileSystem.hpp"
 #include "App/SensorListener.hpp"
 #include "App/ActivityFileRegistry.hpp"
+#include "App/GlanceCache.hpp"
 
 // Forward declaration
 namespace App
@@ -65,6 +66,17 @@ struct Info {
 
     /// The target app's uappID (variants only; 0 otherwise). Registry use.
     uint64_t targetAppID = 0;
+};
+
+/**
+ * @brief   A glance app's state, read in one go for building a glance list.
+ */
+struct GlanceSnapshot {
+    App::GlanceData data;          ///< what it last sent (may be from an earlier visit)
+    bool alive = false;            ///< service running, or a request still pending
+    bool glanceRunning = false;    ///< in glance mode
+    uint32_t updates = 0;          ///< updates sent since its glance started
+    uint32_t startMs = 0;          ///< when its glance started
 };
 
 class IGlance {
@@ -284,6 +296,11 @@ public:
     App::Capabilities getCapabilities();
     App::GlanceData getGlanceData();
 
+    /// The glance's state for a list. The update count is read before the
+    /// data, so a count that says it has sent something always comes with
+    /// what it sent.
+    GlanceSnapshot getGlanceSnapshot();
+
     void onFrameTick(uint32_t timestamp);
 
 
@@ -374,8 +391,9 @@ protected:
 
     /// Updates the app has sent since its glance started: the first is
     /// usually a placeholder, the second its first real value, and the time
-    /// to each is what the Glances screen waits for. App thread only.
-    uint32_t mGlanceUpdates = 0;
+    /// to each is what the Glances screen waits for. Counted on the app
+    /// thread, after the data is stored; read by the Backend for its lists.
+    std::atomic<uint32_t> mGlanceUpdates {0};
 
     enum class AppPartState {
         NONE,
@@ -476,6 +494,9 @@ public:
     const char* getName() const {return mInfo.name;}
     App::Capabilities getCapabilities();
     App::GlanceData getGlanceData();
+
+    /// The glance's state for a list; an empty one when there is no instance.
+    GlanceSnapshot getGlanceSnapshot();
 
     /**
      * @brief   Base type of the application.
@@ -599,6 +620,16 @@ private:
     App::LaunchFailure mCreateFailure {App::LaunchFailure::NONE};
     App::LifeCycleCallback *mLifeCycleCb;
     AppSurface &mSurface;
+
+    /// Asked to start its glance on this visit to the Glances screen, and not
+    /// yet told to stop. Backend thread only, like every glance request.
+    bool mGlanceRequested = false;
+
+    /// What the glance showed last, for its next visit: kept here rather than
+    /// in the instance, which goes when the app exits. Backend thread only:
+    /// it is read and written while a glance list is built.
+    App::CachedGlance mLastGlance;
+
     ActivityFileRegistry mActivityFileRegistry;
     char mActivityFilePrefix[FS::FileSystem::skMaxPathLen];
     bool mHasNewActivity;

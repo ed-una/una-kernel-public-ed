@@ -1239,8 +1239,10 @@ void Backend::sendGlanceList(const char *reason)
     mGlanceList.beginBuild();
 
     const uint32_t startMs = OS::GetTimeMs();
+    App::Manager::GlanceListCounts made;
     B2GEvent::UserAppGlanceList rsp {};
-    rsp.list = std::make_shared<std::vector<App::GlanceData>>(appmgr.getGlancesData());
+    rsp.list = std::make_shared<std::vector<App::GlanceData>>(
+            appmgr.getGlancesData(startMs, &made));
 
     sortGlances(*rsp.list);
 
@@ -1253,9 +1255,13 @@ void Backend::sendGlanceList(const char *reason)
     }
 
     const uint32_t nowMs = OS::GetTimeMs();
-    GLANCE_TIMING_LOG("list #%lu (%s): %lu items, built in %lu ms%s, t+%lu\n",
+    GLANCE_TIMING_LOG("list #%lu (%s): %lu items (live %lu, cached %lu, placeholder %lu), "
+            "built in %lu ms%s, t+%lu\n",
             static_cast<unsigned long>(++mGlanceListsSent), reason,
             static_cast<unsigned long>(items),
+            static_cast<unsigned long>(made.live),
+            static_cast<unsigned long>(made.cached),
+            static_cast<unsigned long>(made.placeholder),
             static_cast<unsigned long>(App::GlanceTiming::ElapsedMs(startMs, nowMs)),
             sent ? "" : ", DROPPED (GUI queue full)",
             static_cast<unsigned long>(App::GlanceTiming::SinceOpenMs(nowMs)));

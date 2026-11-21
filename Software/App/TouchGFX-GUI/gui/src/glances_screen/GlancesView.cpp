@@ -49,6 +49,14 @@ void GlancesView::updAppList(const std::shared_ptr<std::vector<App::GlanceData>>
               static_cast<int>(menu.getNumberOfItems()));
 }
 
+void GlancesView::showKeptList(const std::shared_ptr<std::vector<App::GlanceData>> &list)
+{
+    menu.updAppList(list);
+    LOG_DEBUG("GlanceTiming: kept list applied at frame 0: %lu glances, items %d\n",
+              static_cast<unsigned long>(list ? list->size() : 0),
+              static_cast<int>(menu.getNumberOfItems()));
+}
+
 void GlancesView::setNotifications(uint32_t callsNum, uint32_t emailsNum, uint32_t msgsNum)
 {
     menu.setNotifications(callsNum, emailsNum, msgsNum);

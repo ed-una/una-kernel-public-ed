@@ -74,15 +74,30 @@ struct Capabilities {
 
 constexpr uint32_t kGlanceControlsMax = 32;     ///< Maximum number of GlanceControls for a single application
 
-// Only the icons have pointers to data,
-// but since this data is only used for display,
-// even if it is not valid it will not crash,
-// it will just display garbage.
-// All other data is a copy.
+/// Copies of the pixels a glance's image controls show (see App/GlanceCache.hpp).
+/// Only the kernel looks inside; everyone else just keeps it alive.
+struct GlancePixels;
+
+/**
+ * @struct GlanceData
+ * @brief One glance as the Glances screen draws it.
+ *
+ * Everything is a copy. The image controls point at @ref pixels, which the
+ * kernel fills while the app is still loaded: the app's own icons live in the
+ * app's memory, which is gone once it exits, and this data outlives it - in
+ * the last list the GUI keeps between visits, and in the kernel's cache of
+ * each glance's last values. Whoever holds a GlanceData holds its pixels.
+ */
 struct GlanceData {
     uint8_t count = 0;
     GlanceControl_t ctrls[App::kGlanceControlsMax];
     char altname[App::kNameLen] {};
+
+    /// The glance app's service PID: which app this is, whatever its place in
+    /// the list.
+    uint32_t pid = 0;
+
+    std::shared_ptr<const GlancePixels> pixels;
 };
 
 /**

@@ -12,6 +12,7 @@
 #include "App/AliasRules.hpp"
 #include "App/IconPool.hpp"
 #include "App/GlanceTiming.hpp"
+#include "App/GlanceSelect.hpp"
 
 #include <algorithm>
 #include <string>
@@ -731,7 +732,7 @@ App::IconRef Manager::getIconSet(uint64_t appId)
     return set;
 }
 
-std::vector<App::GlanceData> Manager::getGlancesData()
+std::vector<App::GlanceData> Manager::getGlancesData(uint32_t nowMs, GlanceListCounts *counts)
 {
     std::vector<App::GlanceData> result;
     uint32_t cnt = 0;
@@ -743,18 +744,53 @@ std::vector<App::GlanceData> Manager::getGlancesData()
     }
     result.reserve(cnt);
 
+    GlanceListCounts made;
     for (auto &app : mApps) {
-        if (!app.isType(App::Type::kGlance) || !app.isGlanceRun()) {
+        if (!app.isType(App::Type::kGlance)) {
             continue;
         }
-        App::GlanceData data = app.getGlanceData();
 
-        // Skip empty objects
-        if (data.count > 0) {
-            result.push_back(data);
+        const App::GlanceSnapshot s = app.getGlanceSnapshot();
+
+        App::GlanceInputs in;
+        in.requested     = app.mGlanceRequested;
+        in.alive         = s.alive;
+        in.glanceRunning = s.glanceRunning;
+        in.updates       = s.updates;
+        in.hasData       = s.data.count > 0;
+        in.msSinceStart  = GlanceTiming::ElapsedMs(s.startMs, nowMs);
+        in.hasCache      = app.mLastGlance.valid();
+
+        switch (App::SelectGlance(in)) {
+            case App::GlanceSource::kLive:
+                app.mLastGlance.store(s.data);
+                result.push_back(s.data);
+                made.live++;
+                break;
+
+            case App::GlanceSource::kCached:
+                result.push_back(app.mLastGlance.expand(app.getName(), app.getSrvPID()));
+                made.cached++;
+                break;
+
+            case App::GlanceSource::kPlaceholder: {
+                // Its name and nothing else: the row is there from the first
+                // list, so the list does not grow as the apps report.
+                App::GlanceData d {};
+                snprintf(d.altname, sizeof(d.altname), "%s", app.getName());
+                d.pid = app.getSrvPID();
+                result.push_back(std::move(d));
+                made.placeholder++;
+            } break;
+
+            case App::GlanceSource::kOmit:
+                break;
         }
     }
 
+    if (counts) {
+        *counts = made;
+    }
     return result;
 }
 

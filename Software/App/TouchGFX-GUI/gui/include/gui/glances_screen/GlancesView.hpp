@@ -17,6 +17,9 @@ public:
 
     void setNotifications(uint32_t callsNum, uint32_t emailsNum, uint32_t msgsNum);
     void updAppList(const std::shared_ptr<std::vector<App::GlanceData>> &list);
+
+    /// The list kept from the last visit, drawn as the screen opens.
+    void showKeptList(const std::shared_ptr<std::vector<App::GlanceData>> &list);
 protected:
     virtual void handleKeyEvent(uint8_t key) override;
 

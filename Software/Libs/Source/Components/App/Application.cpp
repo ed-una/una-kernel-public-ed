@@ -99,6 +99,16 @@ App::GlanceData Application::getGlanceData()
     return mApp->getGlanceData();
 }
 
+GlanceSnapshot Application::getGlanceSnapshot()
+{
+    OS::MutexCS cs(*mpLifecycleMutex);
+    if (mApp == nullptr) {
+        return {};
+    }
+
+    return mApp->getGlanceSnapshot();
+}
+
 App::Type Application::getType() const
 {
     return App::TypeFromFlags(mInfo.flags);
@@ -190,6 +200,7 @@ bool Application::resume(uint32_t timeout)
 
 bool Application::runGlance(uint32_t timeout)
 {
+    mGlanceRequested = true;
     if(!create()) {
         return false;
     }
@@ -215,6 +226,7 @@ bool Application::hasPendingRequests() const
 
 bool Application::stopGlance(uint32_t timeout)
 {
+    mGlanceRequested = false;
     if (!isCreated()) {
         return true;
     }
@@ -805,6 +817,22 @@ App::GlanceData AppInstance::getGlanceData()
 {
     OS::MutexCS cs(mMutex);
     return mGlanceData;
+}
+
+GlanceSnapshot AppInstance::getGlanceSnapshot()
+{
+    GlanceSnapshot s;
+    // The count first: it is raised only after the data is stored, so having
+    // seen it raised, the data read next is at least that new.
+    s.updates = mGlanceUpdates.load();
+    s.startMs = mGlanceStartMs.load(std::memory_order_relaxed);
+    {
+        OS::MutexCS cs(mMutex);
+        s.data = mGlanceData;
+    }
+    s.glanceRunning = isGlanceRun();
+    s.alive = isSrvRun() || hasPendingRequests();
+    return s;
 }
 
 void AppInstance::onFrameTick(uint32_t timestamp)
@@ -1869,23 +1897,36 @@ void AppInstance::appMsgHandler(SDK::MessageBase* msg)
             LOG_DEBUG("[%s] Requests glance update\n", mInfo.name);
             auto* gl = static_cast<SDK::Message::RequestGlanceUpdate*>(msg);
 
-            // Safety saving
-            {
-                OS::MutexCS cs(mMutex);
-                mGlanceData.count = 0;
+            // Safety saving: a copy, built before the lock is taken.
+            App::GlanceData fresh {};
+            snprintf(fresh.altname, sizeof(fresh.altname), "%s", mInfo.name);
+            fresh.pid = mInfo.srvPID;
 
-                snprintf(mGlanceData.altname, sizeof(mGlanceData.altname), "%s", mInfo.name);
-
-                for (uint32_t i = 0; i < gl->controlsNumber; i++) {
-                    LOG_DEBUG("ctrl %d, id %u, valid %d\n", i, gl->controls[i].id, gl->controls[i].valid);
-                    mGlanceData.ctrls[i] = gl->controls[i];
-                    mGlanceData.count++;
-                    if(mGlanceData.count == App::kGlanceControlsMax) {
-                        LOG_DEBUG("[%s] Maximum number of glance controls reached\n", mInfo.name);
-                        break;
-                    }
+            for (uint32_t i = 0; i < gl->controlsNumber; i++) {
+                LOG_DEBUG("ctrl %d, id %u, valid %d\n", i, gl->controls[i].id, gl->controls[i].valid);
+                fresh.ctrls[i] = gl->controls[i];
+                fresh.count++;
+                if(fresh.count == App::kGlanceControlsMax) {
+                    LOG_DEBUG("[%s] Maximum number of glance controls reached\n", mInfo.name);
+                    break;
                 }
             }
+
+            // Here, on this thread, while the app waits for the completion:
+            // the one moment its icons are certain to be loaded. The copies
+            // outlive the app, so its data can be shown again on the next
+            // visit after it has exited. Only this thread writes mGlanceData,
+            // so reading its pixels here needs no lock.
+            CopyGlanceImages(fresh, mGlanceData.pixels);
+
+            {
+                OS::MutexCS cs(mMutex);
+                mGlanceData = std::move(fresh);
+            }
+
+            // After the store, before the push below: a list built because of
+            // this update must count it.
+            const uint32_t updates = ++mGlanceUpdates;
 
             mMessageMgr.signalCompletion(msg, SDK::MessageResult::SUCCESS);
 
@@ -1899,7 +1940,6 @@ void AppInstance::appMsgHandler(SDK::MessageBase* msg)
             // placeholder and the second its first real value, which is the
             // pair the Glances screen waits for. After the completion, so the
             // app is not kept waiting while the line goes out.
-            const uint32_t updates = ++mGlanceUpdates;
             if (updates <= 2) {
                 const uint32_t nowMs = OS::GetTimeMs();
                 GLANCE_TIMING_LOG("[%s] update #%lu: %lu ms after run, t+%lu\n",

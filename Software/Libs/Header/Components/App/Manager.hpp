@@ -106,7 +106,24 @@ public:
      */
     std::vector<uint64_t> getAppIds(App::Type t);
 
-    std::vector<App::GlanceData> getGlancesData();
+    /// How a glance list was made up, for the GlanceTiming lines.
+    struct GlanceListCounts {
+        uint32_t live = 0;
+        uint32_t cached = 0;
+        uint32_t placeholder = 0;
+    };
+
+    /**
+     * @brief   The glance list for the Glances screen.
+     * @details One entry per glance app asked to start on this visit, chosen
+     *          by App::SelectGlance(): what it sent, what it showed last time
+     *          while it starts, or its name alone on the first visit. Entries
+     *          that are live become the app's cached values.
+     * @note    Backend thread only: it reads and writes each app's cache.
+     * @param   nowMs: the current time, for the hold on a first update.
+     * @param   counts: filled in, if given.
+     */
+    std::vector<App::GlanceData> getGlancesData(uint32_t nowMs, GlanceListCounts *counts = nullptr);
 
     void autoRun();
 

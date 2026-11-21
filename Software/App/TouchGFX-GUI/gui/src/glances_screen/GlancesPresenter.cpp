@@ -18,6 +18,14 @@ void GlancesPresenter::activate()
     // once the Backend thread takes the start request.
     LOG_DEBUG("GlanceTiming: open, frame 0\n");
 
+    // What the screen showed last time, on this very frame: the kernel's
+    // first list follows once the glance apps have been asked to start, which
+    // takes long enough to see. Before the position, which needs the items.
+    const std::shared_ptr<std::vector<App::GlanceData>> last = model->getLastGlanceList();
+    if (last) {
+        view.showKeptList(last);
+    }
+
     // Set current menu position
     view.setPositionId(model->getPosMenuGlances());
 

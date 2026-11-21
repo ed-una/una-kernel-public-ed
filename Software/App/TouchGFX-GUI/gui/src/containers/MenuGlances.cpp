@@ -228,21 +228,22 @@ void MenuGlances::createGlanceControls(const std::shared_ptr<std::vector<App::Gl
     for (size_t i = 0; i < list->size(); i++) {
         const auto& ctrls = (*list)[i];
 
-        if (ctrls.count > 0) {
-        
-            DrawableGlanceData &newGlance = mWidgetsPool.emplace_back();
+        // Every entry gets a row, an empty one included: the kernel sends a
+        // glance with no controls while its app starts on the first visit
+        // after boot, so its name is listed from the start. Skipping it would
+        // leave the rows and the list out of step.
+        DrawableGlanceData &newGlance = mWidgetsPool.emplace_back();
+        snprintf(newGlance.altname, sizeof(newGlance.altname), "%s", ctrls.altname);
 
-            for (uint8_t c = 0; c < ctrls.count; c++) {
-                Drawable* drawable = create(ctrls.ctrls[c]);
-                if (drawable) {
-                    DrawableGlanceData::ControlMapItem item{};
-                    item.id = ctrls.ctrls[c].id;
-                    item.d = drawable;
-                    newGlance.controlMap.push_back(item);
-                    snprintf(newGlance.altname, sizeof(newGlance.altname), "%s", ctrls.altname);
+        for (uint8_t c = 0; c < ctrls.count; c++) {
+            Drawable* drawable = create(ctrls.ctrls[c]);
+            if (drawable) {
+                DrawableGlanceData::ControlMapItem item{};
+                item.id = ctrls.ctrls[c].id;
+                item.d = drawable;
+                newGlance.controlMap.push_back(item);
 
-                    //LOG_DEBUG("new control: %s, id=%d, 0x%08X\n", newGlance.altname, item.id, item.d);
-                }
+                //LOG_DEBUG("new control: %s, id=%d, 0x%08X\n", newGlance.altname, item.id, item.d);
             }
         }
     }
@@ -277,6 +278,22 @@ void MenuGlances::updateGlanceControls(const std::shared_ptr<std::vector<App::Gl
                 //LOG_DEBUG("upd control: %s, id=%d, 0x%08X\n", existGlance.altname, item.id, item.d);
 
                 update(ctrls.ctrls[c], item.d);
+            } else {
+                // A control this row has not had yet: a glance listed by name
+                // alone while its app started gets its controls here, when it
+                // first reports, in a list the same length as the last.
+                Drawable* drawable = create(ctrls.ctrls[c]);
+                if (drawable) {
+                    DrawableGlanceData::ControlMapItem item{};
+                    item.id = ctrls.ctrls[c].id;
+                    item.d = drawable;
+                    existGlance.controlMap.push_back(item);
+
+                    // Straight away, as for every control made: the text and
+                    // box constructors take their size in the wrong order,
+                    // and update() is what puts it right.
+                    update(ctrls.ctrls[c], drawable);
+                }
             }
         }
     }
