@@ -114,7 +114,7 @@ extern uint32_t SystemCoreClock;
 
 /* Software timer definitions. */
 #define configUSE_TIMERS                         1
-#define configTIMER_TASK_PRIORITY                ( 2 )
+#define configTIMER_TASK_PRIORITY                ( 24 )
 #define configTIMER_QUEUE_LENGTH                 10
 #define configTIMER_TASK_STACK_DEPTH             1024
 
@@ -182,6 +182,19 @@ header file. */
 #define SysTick_Handler xPortSysTickHandler
 
 /* USER CODE BEGIN Defines */
+
+// The timer daemon runs every software timer callback, and the GUI's frames
+// are one of them (FrameSync in app_touchgfx.cpp), as are the apps' frame and
+// glance ticks. At CubeMX's default priority of 2 it ran only when every task
+// at osPriorityNormal (24) was blocked, so a burst of work at Normal (opening
+// Glances loads a service per glance app, through polled eMMC reads) left the
+// screen without a single frame for its whole length: 440 ms on every open,
+// measured on the watch. At Normal it takes turns with that work instead.
+// Here as well as in UnaWatch.ioc, so a regeneration that drops it fails the
+// build rather than bringing the stall back without a word.
+#if (configTIMER_TASK_PRIORITY < 24)
+#error "configTIMER_TASK_PRIORITY must be at least osPriorityNormal (24), see above"
+#endif
 #if (configTICK_RATE_HZ == 1024)
 // The macros are designed for 1024Hz as they use shifts instead of multiplication and division.
 #define MS_TO_TICKS_MAX_MS  4194303999UL
