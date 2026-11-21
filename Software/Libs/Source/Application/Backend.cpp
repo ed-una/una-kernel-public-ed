@@ -328,6 +328,11 @@ void Backend::thread()
     if (HWButtons::GetInstance().get(Interface::IButtons::Id::SW1) == false) {
         appmgr.scan();
 
+        // Every installed glance by name, kept by the GUI until the first
+        // visit: the screen opens with all its rows on its first frame
+        // instead of waiting for the glance apps to be asked to start.
+        sendGlancesAtRest("boot");
+
         // Loaded before the autorun services, so it is ready to draw the
         // moment the home screen asks for it, rather than being read off the
         // file system while the user waits. Not put on screen here: no screen
@@ -595,8 +600,10 @@ bool Backend::receiveGuiEvent(B2GEvent::Data &data)
     // On the GUI thread, as it takes the event. A glance list taken is the
     // moment the next one may be built: anything reported since this one was
     // built asks for it now, so the screen gets it on its next frame and never
-    // has two lists waiting (see App::GlanceListSignal).
-    if (std::holds_alternative<B2GEvent::UserAppGlanceList>(data) && mGlanceList.delivered()) {
+    // has two lists waiting (see App::GlanceListSignal). A list sent at rest
+    // was never in flight, so taking it says nothing about the visit's.
+    const auto *glances = std::get_if<B2GEvent::UserAppGlanceList>(&data);
+    if (glances && !glances->atRest && mGlanceList.delivered()) {
         if (!sendEventToBackend(G2BEvent::AppGlancesChanged{})) {
             mGlanceList.postFailed();
         }
@@ -1267,6 +1274,34 @@ void Backend::sendGlanceList(const char *reason)
             static_cast<unsigned long>(App::GlanceTiming::SinceOpenMs(nowMs)));
 }
 
+// Only while the screen is closed, and not through mGlanceList: nothing is in
+// flight then, and a visit's lists keep their one-at-a-time rule untouched.
+// The GUI keeps the newest list it is given (Model::mLastGlanceList), so this
+// is what the next visit draws on its first frame.
+void Backend::sendGlancesAtRest(const char *reason)
+{
+    App::Manager& appmgr = App::Manager::GetInstance();
+
+    App::Manager::GlanceListCounts made;
+    B2GEvent::UserAppGlanceList rsp {};
+    rsp.atRest = true;
+    rsp.list = std::make_shared<std::vector<App::GlanceData>>(appmgr.getGlancesAtRest(&made));
+    sortGlances(*rsp.list);
+
+    const size_t items = rsp.list->size();
+    if (!sendEventToGui(rsp)) {
+        // The first visit then opens as it did before this list existed:
+        // rows from the kernel's first list of the visit.
+        LOG_WARNING("Glance list at rest (%s) dropped: GUI queue full\n", reason);
+        return;
+    }
+    GLANCE_TIMING_LOG("list at rest (%s): %lu items (cached %lu, placeholder %lu)\n",
+            reason,
+            static_cast<unsigned long>(items),
+            static_cast<unsigned long>(made.cached),
+            static_cast<unsigned long>(made.placeholder));
+}
+
 void Backend::guiHandler(const G2BEvent::UserAppPause &evt)
 {
     LOG_DEBUG("AppPause [pid = 0x%08X]\n", evt.pid);
@@ -1684,6 +1719,13 @@ void Backend::guiHandler(const G2BEvent::MsdClose &evt)
             .getSettings().watchfaceAppId);
 
     mgr.autoRun();
+
+    // The glance order may have been edited over USB. The GUI's kept list is
+    // what the next visit draws first, so it should be in the order the
+    // kernel will send.
+    if (!mGlancesOpen.load()) {
+        sendGlancesAtRest("usb closed");
+    }
 
     OS::Delay(100); // TOTO: Fix App manager
 

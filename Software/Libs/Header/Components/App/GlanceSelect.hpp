@@ -67,6 +67,19 @@ inline GlanceSource SelectGlance(const GlanceInputs &in)
     return GlanceSource::kOmit;
 }
 
+/**
+ * @brief   Decide what one installed glance app contributes to a list sent
+ *          while the Glances screen is closed (at boot, after the USB drive).
+ * @details No app is running then, so every installed one is listed: with
+ *          what it showed last time if there was a last time, else by name
+ *          alone. The GUI keeps the list and draws it on the frame the screen
+ *          opens, so even the first visit after boot opens with every row.
+ */
+inline GlanceSource SelectGlanceAtRest(bool hasCache)
+{
+    return hasCache ? GlanceSource::kCached : GlanceSource::kPlaceholder;
+}
+
 } // namespace App
 
 #endif // APP_GLANCE_SELECT_HPP

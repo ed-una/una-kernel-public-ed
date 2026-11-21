@@ -21,6 +21,7 @@ namespace {
 using App::GlanceInputs;
 using App::GlanceSource;
 using App::SelectGlance;
+using App::SelectGlanceAtRest;
 using App::kGlanceHoldFirstUpdateMs;
 
 GlanceInputs Starting(bool cached)
@@ -106,6 +107,23 @@ TEST(GlanceSelect, NotAskedOnThisVisitIsLeftOut)
     GlanceInputs in = Reported(3, 900, true);
     in.requested = false;
     EXPECT_EQ(SelectGlance(in), GlanceSource::kOmit);
+}
+
+// Sent while the screen is closed: every installed glance is listed, so the
+// first visit after boot has every row on its first frame.
+TEST(GlanceSelect, AtRestEveryGlanceIsListed)
+{
+    EXPECT_EQ(SelectGlanceAtRest(false), GlanceSource::kPlaceholder);
+    EXPECT_EQ(SelectGlanceAtRest(true), GlanceSource::kCached);
+}
+
+// The row a placeholder makes at rest is the one the open path makes for a
+// starting app with nothing cached, so the first list of a visit matches the
+// one the GUI kept and nothing moves.
+TEST(GlanceSelect, AtRestMatchesAStartingApp)
+{
+    EXPECT_EQ(SelectGlanceAtRest(false), SelectGlance(Starting(false)));
+    EXPECT_EQ(SelectGlanceAtRest(true), SelectGlance(Starting(true)));
 }
 
 } // namespace

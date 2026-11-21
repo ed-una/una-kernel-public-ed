@@ -45,10 +45,11 @@ public:
         updGps();
         updMag();
         stepGlances();
+        releaseBackendHold();
 
-
-
-        while (!mGuiRxQueue.empty()) {
+        // While the Backend is held, what the GUI sent waits for it, as on
+        // the watch, where the Backend thread is still in startGlances().
+        while (mBackendHeldTicks == 0 && !mGuiRxQueue.empty()) {
             auto data = mGuiRxQueue.front();
             mGuiRxQueue.pop();
 
@@ -439,8 +440,8 @@ public:
 
             // As the kernel's Backend does: the GUI taking a glance list is
             // when the next one may be built, if anything changed since.
-            if (std::holds_alternative<B2GEvent::UserAppGlanceList>(data) &&
-                    mGlanceSignal.delivered()) {
+            const auto *glances = std::get_if<B2GEvent::UserAppGlanceList>(&data);
+            if (glances && !glances->atRest && mGlanceSignal.delivered()) {
                 sendGlanceList("push");
             }
             return true;
@@ -485,10 +486,18 @@ private:
     //    keeps them, App::CachedGlance), or its name alone on the first visit.
     //    The kernel copies the icons when they are sent (CopyGlanceImages),
     //    as the watch does, so a list never points into an app.
+    //  - asking them holds the Backend thread (startGlances()): 178 to 249 ms
+    //    with 11 glances in the round 2 watch logs (0171, 0172). Whatever the
+    //    GUI sent after the start, and every report pushed meanwhile, waits
+    //    for it, so the visit's first list is drawn on frame 3;
+    //  - at boot the kernel sends every installed glance at rest (by name,
+    //    or with last visit's values), which the GUI keeps for the first
+    //    frame of the first visit.
     // Ticks here are the GUI's, 100 ms each.
     static constexpr uint32_t skGlancesCount    = 3;
     static constexpr uint32_t skGlanceLoadTicks = 2;    // 200 ms per app, a guess
     static constexpr uint32_t skGlanceTickTicks = 10;   // the kernel's 1 Hz glance tick
+    static constexpr uint32_t skStartHoldTicks  = 2;    // 200 ms, the watch's startGlances()
     static constexpr uint32_t skMsPerTick       = 1000 / App::kFrameRate;
 
     struct MockGlanceApp {
@@ -509,9 +518,27 @@ private:
     MockGlanceApp mGlanceApp[skGlancesCount];
     App::GlanceListSignal mGlanceSignal;
     App::CachedGlance     mGlanceCache[skGlancesCount];   // outlives the visit
+    uint32_t      mBackendHeldTicks   = 0;      // left of the startGlances() hold
+    bool          mGlanceListDeferred = false;  // a list asked for during the hold
+
+    void releaseBackendHold()
+    {
+        if (mBackendHeldTicks == 0 || --mBackendHeldTicks > 0) {
+            return;
+        }
+        LOG_DEBUG("GlanceTiming: [mock kernel] open: %u glance apps asked to start in %u ms\n",
+                  static_cast<unsigned>(skGlancesCount),
+                  static_cast<unsigned>(skStartHoldTicks * skMsPerTick));
+        if (mGlanceListDeferred) {
+            mGlanceListDeferred = false;
+            sendGlanceList("push");
+        }
+    }
 
     void glancesOpen()
     {
+        mBackendHeldTicks   = skStartHoldTicks;
+        mGlanceListDeferred = false;
         mGlancesOpen        = true;
         mGlanceTick         = 0;
         mGlanceTimerRunning = false;
@@ -523,8 +550,6 @@ private:
             mGlanceApp[i].readyTick = (i + 1) * skGlanceLoadTicks;
             mGlance[i].setPlaceholder();
         }
-        LOG_DEBUG("GlanceTiming: [mock kernel] open: %u glance apps asked to start\n",
-                  static_cast<unsigned>(skGlancesCount));
     }
 
     void glancesClose()
@@ -635,8 +660,40 @@ private:
         }
     }
 
+    // Backend::sendGlancesAtRest(): every glance, kept by the GUI for the first
+    // frame of the next visit. Outside the signal, as on the watch.
+    void sendGlancesAtRest(const char *reason)
+    {
+        std::vector<App::GlanceData> v;
+        unsigned cached = 0, placeholder = 0;
+        for (uint32_t i = 0; i < skGlancesCount; ++i) {
+            if (App::SelectGlanceAtRest(mGlanceCache[i].valid()) == App::GlanceSource::kCached) {
+                v.push_back(mGlanceCache[i].expand(mGlance[i].name(), mGlance[i].pid()));
+                cached++;
+            } else {
+                App::GlanceData d{};
+                snprintf(d.altname, sizeof(d.altname), "%s", mGlance[i].name());
+                d.pid = mGlance[i].pid();
+                v.push_back(d);
+                placeholder++;
+            }
+        }
+        B2GEvent::UserAppGlanceList rsp{};
+        rsp.atRest = true;
+        rsp.list = std::make_shared<std::vector<App::GlanceData>>(v);
+        sendToGui(rsp);
+        LOG_DEBUG("GlanceTiming: [mock kernel] list at rest (%s): %u items (cached %u, placeholder %u)\n",
+                  reason, static_cast<unsigned>(v.size()), cached, placeholder);
+    }
+
     void sendGlanceList(const char *reason)
     {
+        // A report pushed while the Backend is still asking the apps to start
+        // is queued behind it on the watch, and built once it is free.
+        if (mBackendHeldTicks > 0) {
+            mGlanceListDeferred = true;
+            return;
+        }
         mGlanceSignal.beginBuild();
         std::vector<App::GlanceData> v;
         v.reserve(skGlancesCount);
@@ -771,6 +828,8 @@ private:
             snprintf(tmpName, App::kNameLen, "glance_%u", i);
             mGlance[i].createGlance(tmpName, 100 + i);
         }
+        // As the kernel does right after its app scan, ahead of Booted.
+        sendGlancesAtRest("boot");
 
         // Daily health
         sendToGui(B2GEvent::DailyHealth {mSteps, mFloors, mActivityMinutes, mRestingHeartRate, mAverageHeartRate});

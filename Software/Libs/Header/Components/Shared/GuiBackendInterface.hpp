@@ -526,6 +526,9 @@ struct UserAppCapabilities {
 // Notify GUI about the glances data of the apps
 struct UserAppGlanceList {
     std::shared_ptr<std::vector<App::GlanceData>> list;
+    /// Sent while the Glances screen is closed, for the GUI to keep, rather
+    /// than one of a visit's lists: it does not count as the list in flight.
+    bool atRest = false;
 };
 
 

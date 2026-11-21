@@ -125,6 +125,18 @@ public:
      */
     std::vector<App::GlanceData> getGlancesData(uint32_t nowMs, GlanceListCounts *counts = nullptr);
 
+    /**
+     * @brief   The glance list while the Glances screen is closed.
+     * @details Every installed glance app, chosen by App::SelectGlanceAtRest():
+     *          what it showed on the last visit, or its name alone. Sent at
+     *          boot and after the USB drive closes, so the GUI holds a full
+     *          list before the first visit and the screen opens with every
+     *          row on its first frame.
+     * @note    Backend thread only: it reads each app's cache.
+     * @param   counts: filled in, if given (live is always 0).
+     */
+    std::vector<App::GlanceData> getGlancesAtRest(GlanceListCounts *counts = nullptr);
+
     void autoRun();
 
     void stopAll();
@@ -217,6 +229,10 @@ private:
     /// Whether an app belongs in a list shown to the user: the file it was
     /// found in, and the code it runs, are both still there.
     static bool isListable(const App::Application &app);
+
+    /// A glance's row before it has shown anything: its name, and its PID as
+    /// its identity.
+    static App::GlanceData glancePlaceholder(const App::Application &app);
     App::Application* contains(const App::Application* ptr);
 
     void guiTickTimCb(void *arg);

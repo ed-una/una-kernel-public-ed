@@ -773,15 +773,12 @@ std::vector<App::GlanceData> Manager::getGlancesData(uint32_t nowMs, GlanceListC
                 made.cached++;
                 break;
 
-            case App::GlanceSource::kPlaceholder: {
+            case App::GlanceSource::kPlaceholder:
                 // Its name and nothing else: the row is there from the first
                 // list, so the list does not grow as the apps report.
-                App::GlanceData d {};
-                snprintf(d.altname, sizeof(d.altname), "%s", app.getName());
-                d.pid = app.getSrvPID();
-                result.push_back(std::move(d));
+                result.push_back(glancePlaceholder(app));
                 made.placeholder++;
-            } break;
+                break;
 
             case App::GlanceSource::kOmit:
                 break;
@@ -792,6 +789,39 @@ std::vector<App::GlanceData> Manager::getGlancesData(uint32_t nowMs, GlanceListC
         *counts = made;
     }
     return result;
+}
+
+std::vector<App::GlanceData> Manager::getGlancesAtRest(GlanceListCounts *counts)
+{
+    std::vector<App::GlanceData> result;
+    GlanceListCounts made;
+    for (auto &app : mApps) {
+        if (!app.isType(App::Type::kGlance)) {
+            continue;
+        }
+        if (App::SelectGlanceAtRest(app.mLastGlance.valid()) == App::GlanceSource::kCached) {
+            result.push_back(app.mLastGlance.expand(app.getName(), app.getSrvPID()));
+            made.cached++;
+        } else {
+            result.push_back(glancePlaceholder(app));
+            made.placeholder++;
+        }
+    }
+
+    if (counts) {
+        *counts = made;
+    }
+    return result;
+}
+
+// The same row on both paths, so the list the GUI keeps from boot and the
+// first list of a visit name and order each app the same way.
+App::GlanceData Manager::glancePlaceholder(const App::Application &app)
+{
+    App::GlanceData d {};
+    snprintf(d.altname, sizeof(d.altname), "%s", app.getName());
+    d.pid = app.getSrvPID();
+    return d;
 }
 
 void Manager::autoRun()

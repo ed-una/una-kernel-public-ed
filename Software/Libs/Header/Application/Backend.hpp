@@ -407,6 +407,11 @@ private:
     /// @param reason: why, for the GlanceTiming line ("request" or "push").
     void sendGlanceList(const char *reason);
 
+    /// Send every installed glance (App::Manager::getGlancesAtRest()) for the
+    /// GUI to keep, while the Glances screen is closed. Backend thread only.
+    /// @param reason: why, for the GlanceTiming line ("boot", "usb closed").
+    void sendGlancesAtRest(const char *reason);
+
     /// Mass storage opened and not yet closed. Set and cleared on the Backend
     /// thread only, by the MsdOpen and MsdClose handlers; atomic so the CLI
     /// can read it.
