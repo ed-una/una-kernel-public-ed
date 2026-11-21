@@ -5,6 +5,7 @@
 #include <touchgfx/widgets/canvas/Line.hpp>
 #include <touchgfx/widgets/BoxWithBorder.hpp>
 #include <gui/containers/GlanceScrollFx.hpp>
+#include <gui/containers/GlanceOrbitFx.hpp>
 
 #include "gui/common/GuiLogger.hpp"
 
@@ -61,6 +62,10 @@ public:
     /// The next scroll transition (Gui::Config::kGlancesScrollFx). Simulator
     /// only, for comparing them in one build.
     void cycleScrollFx();
+
+    /// 3 or 4 frames for the Track-menu scroll (variants 4 and 5). Simulator
+    /// only, for comparing them.
+    void toggleOrbitSteps();
     uint16_t getSelectedItem();
 
     bool isNotificationSelected();
@@ -83,6 +88,19 @@ protected:
 
     /// Drawn over the centre item when a scroll transition is chosen.
     GlanceScrollFx mScrollFx;
+
+    /// The names moving like the Track menu's rows (variants 4 and 5).
+    GlanceOrbitFx mOrbitFx;
+
+    /// Gui::Config::kGlancesScrollFx, or what the simulator's v key chose.
+    static constexpr uint8_t kScrollVariants = 6;
+    uint8_t mScrollVariant = 0;
+
+    void setScrollVariant(uint8_t variant);
+    bool isOrbitScroll() const;
+
+    /// The names of the rows a scroll from @p fromRow passes.
+    void loadOrbitNames(int16_t fromRow);
 
     uint32_t mNotifCallsNum = 0;
     uint32_t mNotifEmailsNum = 0;

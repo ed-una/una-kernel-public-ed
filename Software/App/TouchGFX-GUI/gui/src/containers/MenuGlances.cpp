@@ -33,37 +33,105 @@ void MenuGlances::initialize()
     wheel.setCircular(false);
     sideBar.setCount(Id::COUNT);
 
-    // Over everything, on the wheel's selected item. Added in the simulator
-    // whatever the setting, so the v key can bring any variant in.
+    // Over everything: the effect on the wheel's selected item, then the
+    // Track-menu names over the whole wheel, above the effect so variant 5's
+    // cubes stay under the names. Added in the simulator whatever the
+    // setting, so the v key can bring any variant in.
 #if !defined(SIMULATOR)
-    if (Gui::Config::kGlancesScrollFx != GlanceScrollFx::kNone)
+    if (Gui::Config::kGlancesScrollFx != 0)
 #endif
     {
         constexpr int16_t kSelectedItemOffset = 49;   // MenuGlancesBase: wheel.setSelectedItemOffset()
         mScrollFx.setPosition(GlanceScrollFx::kX, wheel.getY() + kSelectedItemOffset,
                               GlanceScrollFx::kWidth, GlanceScrollFx::kHeight);
-        mScrollFx.setVariant(static_cast<GlanceScrollFx::Variant>(Gui::Config::kGlancesScrollFx));
         add(mScrollFx);
+
+        mOrbitFx.setPosition(GlanceOrbitFx::kX, GlanceOrbitFx::kY,
+                             GlanceOrbitFx::kWidth, GlanceOrbitFx::kHeight);
+        mOrbitFx.initialize();
+        mOrbitFx.setSteps(Gui::Config::kGlancesOrbitSteps);
+        add(mOrbitFx);
+
+        setScrollVariant(Gui::Config::kGlancesScrollFx);
     }
+}
+
+void MenuGlances::setScrollVariant(uint8_t variant)
+{
+    mScrollVariant = (variant < kScrollVariants) ? variant : 0;
+    mScrollFx.cancel();
+    mOrbitFx.cancel();
+
+    // 1 to 3 are GlanceScrollFx's own; 5 uses its cubes under the names.
+    GlanceScrollFx::Variant fx = GlanceScrollFx::kNone;
+    if (mScrollVariant >= 1 && mScrollVariant <= 3) {
+        fx = static_cast<GlanceScrollFx::Variant>(mScrollVariant);
+    } else if (mScrollVariant == 5) {
+        fx = GlanceScrollFx::kCubeBlend;
+    }
+    mScrollFx.setVariant(fx);
+    mOrbitFx.setCentreBox(mScrollVariant == 4);
+
+    // The resting names take the Track menu's distance-1 tier, so the scroll
+    // hands over to them without a change (update() restyles every row).
+    update();
+}
+
+bool MenuGlances::isOrbitScroll() const
+{
+    return mScrollVariant == 4 || mScrollVariant == 5;
 }
 
 bool MenuGlances::isScrolling() const
 {
-    return wheel.isAnimating() || mScrollFx.isRunning();
+    return wheel.isAnimating() || mScrollFx.isRunning() || mOrbitFx.isRunning();
 }
 
 void MenuGlances::tickScrollFx()
 {
+    if (mScrollVariant == 5) {
+        // The names set the pace; the cubes follow them step for step.
+        mOrbitFx.tick();
+        mScrollFx.followStep(mOrbitFx.getStep());
+        return;
+    }
+    mOrbitFx.tick();
     mScrollFx.tick();
 }
 
 void MenuGlances::cycleScrollFx()
 {
-    const auto next = static_cast<GlanceScrollFx::Variant>(
-            (mScrollFx.getVariant() + 1) % GlanceScrollFx::kVariantCount);
-    mScrollFx.setVariant(next);
-    LOG_DEBUG("GlanceFx: variant %u, %s\n", static_cast<unsigned>(next),
-              GlanceScrollFx::variantName(next));
+    static const char* const kNames[kScrollVariants] = {
+        "wheel (today)", "pixel break-up", "dithered wipe", "cube build",
+        "Track-menu names", "Track-menu names with cubes",
+    };
+    setScrollVariant(static_cast<uint8_t>((mScrollVariant + 1) % kScrollVariants));
+    LOG_DEBUG("GlanceFx: variant %u, %s\n", static_cast<unsigned>(mScrollVariant),
+              kNames[mScrollVariant]);
+}
+
+void MenuGlances::toggleOrbitSteps()
+{
+    mOrbitFx.setSteps(mOrbitFx.getSteps() == 3 ? 4 : 3);
+    LOG_DEBUG("GlanceFx: Track-menu names, %u steps\n", static_cast<unsigned>(mOrbitFx.getSteps()));
+}
+
+void MenuGlances::loadOrbitNames(int16_t fromRow)
+{
+    const int16_t count = wheel.getNumberOfItems();
+    for (int8_t k = -GlanceOrbitFx::kReach; k <= GlanceOrbitFx::kReach; ++k) {
+        int16_t row = static_cast<int16_t>((fromRow + k) % count);
+        if (row < 0) {
+            row += count;
+        }
+        if (row == Id::NOTIFICATION) {
+            mOrbitFx.setName(k, touchgfx::TypedText(T_TEXT_NOTIFICATIONS).getText());
+        } else if (row - Id::COUNT < static_cast<int16_t>(mWidgetsPool.size())) {
+            mOrbitFx.setName(k, mWidgetsPool[row - Id::COUNT].altname);
+        } else {
+            mOrbitFx.setName(k, "");
+        }
+    }
 }
 
 void MenuGlances::setNotifications(uint32_t callsNum, uint32_t emailsNum, uint32_t msgsNum)
@@ -186,7 +254,29 @@ void MenuGlances::scrollBy(int8_t direction)
     // The user's choice now: an item still waiting to be restored is not.
     mWantedId = kNoWantedId;
 
-    const int16_t p = wheel.getSelectedItem() + direction;
+    const int16_t from = wheel.getSelectedItem();
+    const int16_t p = from + direction;
+
+    if (isOrbitScroll()) {
+        // As below: the wheel jumps, and a press while a scroll is still on
+        // screen gets no motion at all, only the next item drawn clean.
+        // Variant 5 also waits for its cube layer's clean copy.
+        if (mOrbitFx.isRunning() || mScrollFx.isBusy()) {
+            mOrbitFx.cancel();
+            mScrollFx.cancel();
+            sideBar.animateToId(p, 0);
+        } else {
+            loadOrbitNames(from);
+            mOrbitFx.start(direction);
+            if (mScrollVariant == 5) {
+                mScrollFx.startBlend(direction, static_cast<uint8_t>(mOrbitFx.getSteps() - 1));
+            }
+            sideBar.animateToId(p, mOrbitFx.getSteps());
+        }
+        wheel.animateToItem(p, 0);
+        update();
+        return;
+    }
 
     if (mScrollFx.getVariant() == GlanceScrollFx::kNone) {
         wheel.animateToItem(p, Gui::Config::kGlancesAnimationSteps);
@@ -218,6 +308,7 @@ void MenuGlances::selectItem(int16_t itemIndex)
     }
 
     mScrollFx.cancel();
+    mOrbitFx.cancel();
     wheel.animateToItem(itemIndex, 0);
     sideBar.setActiveId(wheel.getSelectedItem());
 
@@ -241,6 +332,8 @@ void MenuGlances::selectNextLastActivity()
 
 void MenuGlances::wheelUpdateItem(MenuGlancesItem &item, int16_t itemIndex)
 {
+    item.setOrbitStyle(isOrbitScroll());
+
     if (itemIndex == Id::NOTIFICATION) {
         item.setName(T_TEXT_NOTIFICATIONS);
         return;

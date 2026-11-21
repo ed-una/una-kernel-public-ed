@@ -101,6 +101,10 @@ void GlancesView::handleKeyEvent(uint8_t key)
         mCounter = Gui::Config::kGlanceScreenTimeout;
         menu.cycleScrollFx();
     }
+    if (key == 's') {
+        mCounter = Gui::Config::kGlanceScreenTimeout;
+        menu.toggleOrbitSteps();
+    }
 #endif
 }
 

@@ -41,11 +41,21 @@ public:
         kPixelBreak = 1,
         kDitherWipe = 2,
         kCubeBuild = 3,
+        /// Variant 5's centre: the outgoing content as cubes on the first
+        /// frame, the incoming content landing as cubes on the last, under
+        /// GlanceOrbitFx's names, which drive the steps (followStep()).
+        kCubeBlend = 4,
         kVariantCount
     };
 
     /// Frames drawn with the effect after a press; the next one is clean.
     static constexpr uint8_t kFxFrames = 2;
+    static constexpr uint8_t kMaxFxFrames = 3;
+
+    /// Cycle counter on the watch, steady clock in the simulator, for the
+    /// GlanceFx cost lines.
+    static uint32_t ticksNow();
+    static uint32_t ticksToUs(uint32_t ticks);
 
     /// The centre window, in screen pixels: the wheel's selected item (60 px
     /// tall), between the side arcs (lit up to x 18 on the left and from
@@ -82,6 +92,17 @@ public:
      */
     void start(int8_t direction);
 
+    /**
+     * @brief   Start variant 5's centre for one press.
+     * @param   frames: in-between frames of the scroll it goes with (2 or 3).
+     * @note    Only for kCubeBlend, and only when !isBusy(). The steps then
+     *          follow GlanceOrbitFx (followStep()), not tick().
+     */
+    void startBlend(int8_t direction, uint8_t frames);
+
+    /// Take GlanceOrbitFx's step (0 ends). kCubeBlend only.
+    void followStep(uint8_t step);
+
     /// End at once; the next frame draws the item under it clean.
     void cancel();
 
@@ -98,9 +119,19 @@ private:
     static constexpr int16_t kCell = 10;
     static constexpr int16_t kCube = 8;
 
+    static constexpr int16_t kCellCols = kWidth / kCell;
+    static constexpr int16_t kCellRows = kHeight / kCell;
+
     Variant mVariant = kNone;
-    uint8_t mStep = 0;          ///< 0 idle, 1..kFxFrames the frame to draw
+    uint8_t mStep = 0;          ///< 0 idle, 1..mFrames the frame to draw
+    uint8_t mFrames = kFxFrames;
     int8_t mDirection = 1;
+
+    /// Variant 5: each 10 px cell's colour (0 for no ink), of the outgoing
+    /// content (from mClean, at the press) and of the incoming one (read in
+    /// place on the first frame, when the wheel has just drawn it).
+    uint8_t mOldCells[kCellRows][kCellCols] = {};
+    mutable uint8_t mNewCells[kCellRows][kCellCols] = {};
 
     /// The step last drawn, so tick() advances only once a step has been
     /// on screen, whichever order TouchGFX takes keys and ticks in.
@@ -119,12 +150,21 @@ private:
 
     /// Draw time of each step, and of the last refresh of mClean, for the
     /// GlanceFx line.
-    mutable uint32_t mStepUs[kFxFrames + 1] = {};
+    mutable uint32_t mStepUs[kMaxFxFrames + 1] = {};
     mutable uint32_t mCopyUs = 0;
 
     void drawPixelBreak(uint8_t* fb, int32_t stride, const touchgfx::Rect& clip) const;
     void drawDitherWipe(uint8_t* fb, int32_t stride, const touchgfx::Rect& clip) const;
     void drawCubeBuild(uint8_t* fb, int32_t stride, const touchgfx::Rect& clip) const;
+    void drawCubeBlend(uint8_t* fb, int32_t stride, const touchgfx::Rect& clip) const;
+
+    /// Every cell's colour, 0 where it has too little ink to be a cube.
+    static void readCells(const uint8_t* origin, int32_t stride, const touchgfx::Rect& clip,
+                          uint8_t cells[kCellRows][kCellCols]);
+    /// The cubes of @p cells, each moved @p dy (alternate cells 3 or 6 px
+    /// times @p dy's sign when @p stagger), only inside @p clip.
+    static void paintCubes(uint8_t* origin, int32_t stride, const touchgfx::Rect& clip,
+                           const uint8_t cells[kCellRows][kCellCols], int dySign, bool stagger);
 
     void logCost() const;
 };

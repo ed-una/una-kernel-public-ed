@@ -1,4 +1,5 @@
 #include <gui/containers/OrbitMenu.hpp>
+#include <gui/containers/OrbitTiers.hpp>
 #include <touchgfx/Application.hpp>
 #include <touchgfx/Bitmap.hpp>
 #include <texts/TextKeysAndLanguages.hpp>
@@ -23,34 +24,9 @@ const float kBigThreshold = 0.5f;
 float lerpf(float a, float b, float t) { return a + (b - a) * t; }
 
 // --- Label tiers: font + colour by distance from centre ------------------
-// Depth is conveyed by discrete palette colours only (no alpha) -- the panel
-// is 64-colour, so an alpha gradient would land off-palette and band.
-// Rest positions land on 30 / 22 / 18; the intermediate sizes (27, 25, 20)
-// cover the in-between animation frames.
-struct LabelTier
-{
-    float       maxAbsD; ///< Applies while |d| < this.
-    TypedTextId font;    ///< Left-aligned wildcard typed text.
-    uint32_t    color;   ///< Exact palette entry.
-};
-const LabelTier kTiers[] = {
-    { 0.25f,  T_TMP_SEMIBOLD_26_L, SDK::GUI::Color::WHITE },
-    { 0.60f,  T_TMP_SEMIBOLD_22_L, SDK::GUI::Color::WHITE },
-    { 0.90f,  T_TMP_SEMIBOLD_20_L, SDK::GUI::Color::WHITE },
-    { 1.40f,  T_TMP_SEMIBOLD_18_L, SDK::GUI::Color::GRAY },
-    { 1.90f,  T_TMP_REGULAR_18_L, SDK::GUI::Color::GRAY  }, // currently not in use. Select appropriate fonts
-    { 1.0e9f, T_TMP_REGULAR_18_L, SDK::GUI::Color::GRAY  }, // currently not in use. Select appropriate fonts
-};
-
-const LabelTier &pickTier(float absD)
-{
-    for (const LabelTier &t : kTiers) {
-        if (absD < t.maxAbsD) {
-            return t;
-        }
-    }
-    return kTiers[sizeof(kTiers) / sizeof(kTiers[0]) - 1];
-}
+// Shared with the Glances scroll (GlanceOrbitFx), so both move the same way.
+using OrbitTiers::LabelTier;
+using OrbitTiers::pickTier;
 
 } // namespace
 

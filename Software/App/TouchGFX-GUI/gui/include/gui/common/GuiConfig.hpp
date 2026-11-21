@@ -34,12 +34,20 @@ constexpr int32_t kMenuAnimationSteps = 4;
 /// the other menus are not part of that change.
 constexpr int32_t kGlancesAnimationSteps = 2;
 
-/// The Glances scroll transition, a prototype (see GlanceScrollFx):
+/// The Glances scroll transition, a prototype (see GlanceScrollFx and
+/// GlanceOrbitFx):
 ///  0 = the wheel's own animation, as above;
-///  1 = pixel break-up, 2 = dithered wipe, 3 = cube build.
-/// With 1 to 3 the wheel jumps and the effect is drawn over the centre item
-/// for two frames. The simulator cycles through all four with the v key.
+///  1 = pixel break-up, 2 = dithered wipe, 3 = cube build;
+///  4 = the names move like the Track menu's rows (OrbitMenu);
+///  5 = as 4, with the centre content breaking into cubes and landing as cubes.
+/// With 1 to 5 the wheel jumps and the transition is drawn over it. The
+/// simulator cycles through all six with the v key.
 constexpr uint8_t kGlancesScrollFx = 0;
+
+/// Frames per scroll for 4 and 5, settled frame included: OrbitMenu's
+/// animation steps. The Track menu uses 4; Glances is flicked through more,
+/// so 3 (300 ms). The simulator toggles 3 and 4 with the s key.
+constexpr uint8_t kGlancesOrbitSteps = 3;
 
 constexpr uint32_t kScreenTimeoutSteps      = GUI_CONFIG_MS_2_TICKS(30000);     // 30s
 constexpr uint32_t kSavedScreenTimeout      = GUI_CONFIG_MS_2_TICKS(1000);      // 1s;

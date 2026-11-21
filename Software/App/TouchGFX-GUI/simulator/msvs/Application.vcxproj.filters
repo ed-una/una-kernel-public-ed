@@ -1326,6 +1326,9 @@
     <ClCompile Include="..\..\gui\src\containers\GlanceScrollFx.cpp">
       <Filter>Source Files\gui\containers</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\gui\src\containers\GlanceOrbitFx.cpp">
+      <Filter>Source Files\gui\containers</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\generated\gui_generated\src\containers\MenuGlancesBase.cpp">
       <Filter>Source Files\generated\gui_generated\containers</Filter>
     </ClCompile>
@@ -2495,6 +2498,12 @@
       <Filter>Header Files\gui\containers</Filter>
     </ClInclude>
     <ClInclude Include="..\..\gui\include\gui\containers\GlanceScrollFx.hpp">
+      <Filter>Header Files\gui\containers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\gui\include\gui\containers\GlanceOrbitFx.hpp">
+      <Filter>Header Files\gui\containers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\gui\include\gui\containers\OrbitTiers.hpp">
       <Filter>Header Files\gui\containers</Filter>
     </ClInclude>
     <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\containers\MenuGlancesBase.hpp">

@@ -189,6 +189,7 @@
     <ClCompile Include="..\..\generated\gui_generated\src\glances_screen\GlancesViewBase.cpp"/>
     <ClCompile Include="..\..\gui\src\containers\MenuGlances.cpp"/>
     <ClCompile Include="..\..\gui\src\containers\GlanceScrollFx.cpp"/>
+    <ClCompile Include="..\..\gui\src\containers\GlanceOrbitFx.cpp"/>
     <ClCompile Include="..\..\generated\gui_generated\src\containers\MenuGlancesBase.cpp"/>
     <ClCompile Include="..\..\gui\src\containers\MenuGlancesCenterItem.cpp"/>
     <ClCompile Include="..\..\generated\gui_generated\src\containers\MenuGlancesCenterItemBase.cpp"/>
@@ -584,6 +585,8 @@
     <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\glances_screen\GlancesViewBase.hpp"/>
     <ClInclude Include="..\..\gui\include\gui\containers\MenuGlances.hpp"/>
     <ClInclude Include="..\..\gui\include\gui\containers\GlanceScrollFx.hpp"/>
+    <ClInclude Include="..\..\gui\include\gui\containers\GlanceOrbitFx.hpp"/>
+    <ClInclude Include="..\..\gui\include\gui\containers\OrbitTiers.hpp"/>
     <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\containers\MenuGlancesBase.hpp"/>
     <ClInclude Include="..\..\gui\include\gui\containers\MenuGlancesCenterItem.hpp"/>
     <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\containers\MenuGlancesCenterItemBase.hpp"/>

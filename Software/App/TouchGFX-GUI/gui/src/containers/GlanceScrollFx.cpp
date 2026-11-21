@@ -101,9 +101,11 @@ void fill(uint8_t* origin, int32_t stride, const Rect& r, uint8_t colour)
     }
 }
 
+} // namespace
+
 // Cycle counter on the watch (already running: the eMMC driver starts it),
 // steady clock in the simulator.
-uint32_t ticksNow()
+uint32_t GlanceScrollFx::ticksNow()
 {
 #if defined(SIMULATOR)
     return static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::microseconds>(
@@ -113,7 +115,7 @@ uint32_t ticksNow()
 #endif
 }
 
-uint32_t ticksToUs(uint32_t ticks)
+uint32_t GlanceScrollFx::ticksToUs(uint32_t ticks)
 {
 #if defined(SIMULATOR)
     return ticks;
@@ -122,8 +124,6 @@ uint32_t ticksToUs(uint32_t ticks)
     return perUs ? ticks / perUs : 0;
 #endif
 }
-
-} // namespace
 
 GlanceScrollFx::GlanceScrollFx()
 {
@@ -137,6 +137,7 @@ const char* GlanceScrollFx::variantName(Variant v)
         case kPixelBreak: return "pixel break-up";
         case kDitherWipe: return "dithered wipe";
         case kCubeBuild:  return "cube build";
+        case kCubeBlend:  return "cubes under the names";
         default:          return "?";
     }
 }
@@ -147,7 +148,7 @@ void GlanceScrollFx::setVariant(Variant v)
     mVariant = (v < kVariantCount) ? v : kNone;
 
     // Kept for the life of the screen, so a press never allocates.
-    if (mVariant == kPixelBreak || mVariant == kDitherWipe) {
+    if (mVariant == kPixelBreak || mVariant == kDitherWipe || mVariant == kCubeBlend) {
         mClean.assign(static_cast<size_t>(kWidth) * kHeight, kBlack);
     } else {
         std::vector<uint8_t>().swap(mClean);
@@ -162,13 +163,48 @@ void GlanceScrollFx::setVariant(Variant v)
 
 void GlanceScrollFx::start(int8_t direction)
 {
-    if (mVariant == kNone || isBusy()) {
+    if (mVariant == kNone || mVariant == kCubeBlend || isBusy()) {
         return;
     }
     mDirection = (direction < 0) ? -1 : 1;
+    mFrames = kFxFrames;
     mStep = 1;
     mDrawnStep = 0;
     std::fill(std::begin(mStepUs), std::end(mStepUs), 0u);
+    invalidate();
+}
+
+void GlanceScrollFx::startBlend(int8_t direction, uint8_t frames)
+{
+    if (mVariant != kCubeBlend || isBusy() || frames == 0) {
+        return;
+    }
+    mDirection = (direction < 0) ? -1 : 1;
+    mFrames = (frames > kMaxFxFrames) ? kMaxFxFrames : frames;
+    mStep = 1;
+    mDrawnStep = 0;
+    std::fill(std::begin(mStepUs), std::end(mStepUs), 0u);
+
+    // The outgoing content, from the clean copy: complete, since nothing
+    // starts while isBusy().
+    readCells(mClean.data(), kWidth, Rect(0, 0, kWidth, kHeight), mOldCells);
+    invalidate();
+}
+
+void GlanceScrollFx::followStep(uint8_t step)
+{
+    if (mVariant != kCubeBlend || step == mStep) {
+        return;
+    }
+    if (step == 0 || step > mFrames) {
+        if (mStep != 0) {
+            mStep = 0;
+            logCost();
+            invalidate();   // the clean frame
+        }
+        return;
+    }
+    mStep = step;
     invalidate();
 }
 
@@ -190,7 +226,7 @@ void GlanceScrollFx::tick()
     if (mStep == 0 || mDrawnStep != mStep) {
         return;
     }
-    if (mStep < kFxFrames) {
+    if (mStep < mFrames) {
         mStep++;
         invalidate();
         return;
@@ -202,12 +238,25 @@ void GlanceScrollFx::tick()
 
 void GlanceScrollFx::logCost() const
 {
-    LOG_DEBUG("GlanceFx: variant %u (%s): frame 1 drew in %lu us, frame 2 in %lu us, "
-              "last clean copy %lu us\n",
-              static_cast<unsigned>(mVariant), variantName(mVariant),
-              static_cast<unsigned long>(mStepUs[1]),
-              static_cast<unsigned long>(mStepUs[2]),
-              static_cast<unsigned long>(mCopyUs));
+    // Numbered as Gui::Config::kGlancesScrollFx numbers them: the cubes under
+    // the names are variant 5's.
+    const unsigned shown = (mVariant == kCubeBlend) ? 5u : static_cast<unsigned>(mVariant);
+    if (mFrames >= 3) {
+        LOG_DEBUG("GlanceFx: variant %u (%s): frame 1 drew in %lu us, frame 2 in %lu us, "
+                  "frame 3 in %lu us, last clean copy %lu us\n",
+                  shown, variantName(mVariant),
+                  static_cast<unsigned long>(mStepUs[1]),
+                  static_cast<unsigned long>(mStepUs[2]),
+                  static_cast<unsigned long>(mStepUs[3]),
+                  static_cast<unsigned long>(mCopyUs));
+    } else {
+        LOG_DEBUG("GlanceFx: variant %u (%s): frame 1 drew in %lu us, frame 2 in %lu us, "
+                  "last clean copy %lu us\n",
+                  shown, variantName(mVariant),
+                  static_cast<unsigned long>(mStepUs[1]),
+                  static_cast<unsigned long>(mStepUs[2]),
+                  static_cast<unsigned long>(mCopyUs));
+    }
 }
 
 Rect GlanceScrollFx::getSolidRect() const
@@ -268,6 +317,7 @@ void GlanceScrollFx::draw(const Rect& invalidatedArea) const
         case kPixelBreak: drawPixelBreak(origin, stride, clip); break;
         case kDitherWipe: drawDitherWipe(origin, stride, clip); break;
         case kCubeBuild:  drawCubeBuild(origin, stride, clip); break;
+        case kCubeBlend:  drawCubeBlend(origin, stride, clip); break;
         default: break;
     }
 
@@ -349,35 +399,64 @@ void GlanceScrollFx::drawDitherWipe(uint8_t* origin, int32_t stride, const Rect&
 // gone from the first frame, so no frame shows the two together.
 void GlanceScrollFx::drawCubeBuild(uint8_t* origin, int32_t stride, const Rect& clip) const
 {
-    constexpr int16_t cols = kWidth / kCell;
-    constexpr int16_t rows = kHeight / kCell;
-    constexpr int16_t x0 = (kWidth - cols * kCell) / 2;
-    constexpr int kMinInk = 4;
-
     // Read in place, before anything is written: the new item was drawn
     // under this a moment ago.
-    uint8_t colour[rows][cols];
-    for (int16_t cy = 0; cy < rows; ++cy) {
-        for (int16_t cx = 0; cx < cols; ++cx) {
+    uint8_t cells[kCellRows][kCellCols] = {};
+    readCells(origin, stride, clip, cells);
+    fill(origin, stride, clip, kBlack);
+    paintCubes(origin, stride, clip, cells, (mStep == 1) ? mDirection : 0, true);
+}
+
+// Variant 5, under GlanceOrbitFx's names. Frame 1: the outgoing content as
+// cubes lifting away with the scroll. The last in-between frame: the incoming
+// content landing, 3 or 6 px short of its place. Any frame between: clear.
+// The incoming content is read on frame 1, when the wheel has just drawn it
+// under this; GlanceOrbitFx keeps the centre box off for this variant so it is
+// drawn at all.
+void GlanceScrollFx::drawCubeBlend(uint8_t* origin, int32_t stride, const Rect& clip) const
+{
+    if (mStep == 1) {
+        readCells(origin, stride, clip, mNewCells);
+    }
+    fill(origin, stride, clip, kBlack);
+    if (mStep == 1) {
+        paintCubes(origin, stride, clip, mOldCells, -mDirection, true);
+    } else if (mStep == mFrames) {
+        paintCubes(origin, stride, clip, mNewCells, mDirection, true);
+    }
+}
+
+// Cells only where they meet @p clip, so a draw split in parts never reads
+// outside what TouchGFX has just drawn.
+void GlanceScrollFx::readCells(const uint8_t* origin, int32_t stride, const Rect& clip,
+                               uint8_t cells[kCellRows][kCellCols])
+{
+    constexpr int16_t x0 = (kWidth - kCellCols * kCell) / 2;
+    constexpr int kMinInk = 4;
+    for (int16_t cy = 0; cy < kCellRows; ++cy) {
+        for (int16_t cx = 0; cx < kCellCols; ++cx) {
             const Rect c = Rect(x0 + cx * kCell, cy * kCell, kCell, kCell) & clip;
-            const Ink ink = c.isEmpty() ? Ink() : readInk(origin, stride, c);
-            colour[cy][cx] = (ink.count >= kMinInk) ? ink.colour : 0;
+            if (c.isEmpty()) {
+                continue;
+            }
+            const Ink ink = readInk(origin, stride, c);
+            cells[cy][cx] = (ink.count >= kMinInk) ? ink.colour : 0;
         }
     }
+}
 
-    fill(origin, stride, clip, kBlack);
-
+void GlanceScrollFx::paintCubes(uint8_t* origin, int32_t stride, const Rect& clip,
+                                const uint8_t cells[kCellRows][kCellCols], int dySign, bool stagger)
+{
+    constexpr int16_t x0 = (kWidth - kCellCols * kCell) / 2;
     const int16_t inset = (kCell - kCube) / 2;
-    for (int16_t cy = 0; cy < rows; ++cy) {
-        for (int16_t cx = 0; cx < cols; ++cx) {
-            const uint8_t c = colour[cy][cx];
+    for (int16_t cy = 0; cy < kCellRows; ++cy) {
+        for (int16_t cx = 0; cx < kCellCols; ++cx) {
+            const uint8_t c = cells[cy][cx];
             if (c == 0) {
                 continue;
             }
-            int16_t dy = 0;
-            if (mStep == 1) {
-                dy = static_cast<int16_t>(mDirection * (((cx + cy) & 1) ? 6 : 3));
-            }
+            const int16_t dy = static_cast<int16_t>(dySign * ((stagger && ((cx + cy) & 1)) ? 6 : 3));
             // Bright colours keep their colour on top and darken down the
             // sides; dim ones lighten on top, so a cube never sinks to black.
             const bool bright = (c & 3) == 3 || ((c >> 2) & 3) == 3 || ((c >> 4) & 3) == 3;
