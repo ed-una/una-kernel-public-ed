@@ -26,7 +26,10 @@
 void Flash::powerModeAlwaysOn()
 {
     LOG_DEBUG("AlwaysOn\n");
-    enableEMMC();
+    // Powers the card on; not an access, so its count is given back at once.
+    if (enableEMMC()) {
+        disableEMMC();
+    }
     mPowerModeAlwaysOn = true;
     mPowerOffTimer.stop();
 }
@@ -218,6 +221,8 @@ bool Flash::enableEMMC()
     mLastAccessTimestamp = Driver::System::GetTimeMs();
 
     if (mPowerModeAlwaysOn) {
+        // Counted all the same, so every disableEMMC() has its enable.
+        mAccessesInFlight.fetch_add(1);
         return true;
     }
 
@@ -235,6 +240,12 @@ bool Flash::enableEMMC()
             mPowerOffTimer.start(kPowerOffTimeout);
             LOG_DEBUG("On\n");
         }
+    }
+
+    // Under the lock, so the idle timer either sees this access or has
+    // already powered the card off and the code above powered it on again.
+    if (ok) {
+        mAccessesInFlight.fetch_add(1);
     }
 
     mPowerMutex.release();
@@ -338,7 +349,10 @@ bool Flash::maybeRecover()
 
 void Flash::disableEMMC()
 {
-    // do nothing here as we waiting poweroff timeout
+    // The card stays powered until it has been idle for kPowerOffTimeout,
+    // counted from now, the end of this access, rather than from its start.
+    mLastAccessTimestamp = Driver::System::GetTimeMs();
+    mAccessesInFlight.fetch_sub(1);
 }
 
 void Flash::powerOffHandler(void *arg)
@@ -356,7 +370,10 @@ void Flash::powerOffHandler(void *arg)
     }
 
     uint32_t timediff = Driver::System::GetTimeMs() - mLastAccessTimestamp;
-    if (timediff < kPowerOffTimeout) {
+    if (mAccessesInFlight.load() != 0 || timediff < kPowerOffTimeout) {
+        // In use, or not idle long enough. The first matters since this timer
+        // runs at osPriorityNormal: it can now come round in the middle of an
+        // access that polls the card, which at its old priority it could not.
         // Restart timer
         mPowerOffTimer.start(kPowerOffTimeout);
     } else {

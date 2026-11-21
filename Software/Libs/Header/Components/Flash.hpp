@@ -10,6 +10,7 @@
 #ifndef __COMPONENT_FLASH_HPP
 #define __COMPONENT_FLASH_HPP
 
+#include <atomic>
 #include <cstdint>
 #include <cstdbool>
 
@@ -150,6 +151,13 @@ private:
     OS::Timer<Flash> mPowerOffTimer;
     uint32_t mLastAccessTimestamp = 0;
     inline static constexpr uint32_t kPowerOffTimeout = 2000;
+
+    // Accesses between a successful enableEMMC() and its disableEMMC(). The
+    // idle timer must not power the card off under one: the timestamp alone
+    // says when the last access began, not that it has ended, and a single
+    // operation (a large erase, say) can outlast the idle timeout. Raised
+    // under mPowerMutex, the lock the idle timer takes to decide.
+    std::atomic<uint32_t> mAccessesInFlight {0};
 
     // Actual EMMC state
     bool mIsMmcInit = false;
