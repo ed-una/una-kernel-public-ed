@@ -388,6 +388,10 @@ private:
     /// thread posts it, cleared by the Backend thread as it starts the sweep.
     std::atomic<bool> mAppsIdlePending {false};
 
+    /// Glance lists sent to the GUI since the Glances screen last opened, so
+    /// the GlanceTiming lines can number them. Backend thread only.
+    uint32_t mGlanceListsSent = 0;
+
     /// Mass storage opened and not yet closed. Set and cleared on the Backend
     /// thread only, by the MsdOpen and MsdClose handlers; atomic so the CLI
     /// can read it.

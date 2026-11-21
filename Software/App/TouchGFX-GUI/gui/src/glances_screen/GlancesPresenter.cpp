@@ -1,5 +1,10 @@
+// Before every include: the view's headers bring the logger in through
+// MenuGlances.hpp, and it names the module "GUI" if nothing has by then.
+#define LOG_MODULE_PRX      "GUI.Glances"
+
 #include <gui/glances_screen/GlancesView.hpp>
 #include <gui/glances_screen/GlancesPresenter.hpp>
+#include "gui/common/GuiLogger.hpp"
 
 GlancesPresenter::GlancesPresenter(GlancesView& v)
     : view(v)
@@ -9,6 +14,10 @@ GlancesPresenter::GlancesPresenter(GlancesView& v)
 
 void GlancesPresenter::activate()
 {
+    // The GUI's end of the GlanceTiming lines: the kernel's own "open" follows
+    // once the Backend thread takes the start request.
+    LOG_DEBUG("GlanceTiming: open, frame 0\n");
+
     // Set current menu position
     view.setPositionId(model->getPosMenuGlances());
 

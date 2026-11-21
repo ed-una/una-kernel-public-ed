@@ -7,6 +7,7 @@
 #include "Logger.h"
 
 #include "App/InternalKernelMessages.hpp"
+#include "App/GlanceTimingLog.hpp"
 
 
 #include "FileSystem.hpp"
@@ -750,6 +751,7 @@ bool AppInstance::runGlance(uint32_t timeout)
         return false;
     }
 
+    mGlanceRunRequestMs.store(OS::GetTimeMs(), std::memory_order_relaxed);
     auto* msg = mMessageMgr.allocateMessage<App::InternalAppGlanceRun>();
     return sendToAppAndRelease(msg, timeout);
 }
@@ -1249,6 +1251,9 @@ bool AppInstance::runGlc()
     bool result = false;
     LOG_DEBUG("[%s] Glance activating...\n", mInfo.name);
 
+    mGlanceStartMs = OS::GetTimeMs();
+    mGlanceUpdates = 0;
+
     auto* msg = mMessageMgr.allocateMessage<SDK::Message::EventGlanceStart>();
     if (msg) {
         result = mAppComm.sendToService(msg);
@@ -1395,8 +1400,10 @@ void AppInstance::appLifeCycle(SDK::MessageBase* msg)
         } break;
 
         case App::InternalMessageType::APP_GLANCE_RUN: {
+            const uint32_t enteredMs = OS::GetTimeMs();
             bool isSrvWasRun = isSrvRun();
             bool status = runSrv();
+            const uint32_t loadedMs = OS::GetTimeMs();
             if (status) {
                 status = runGlc();
                 if (!isSrvWasRun && !status) {
@@ -1414,6 +1421,18 @@ void AppInstance::appLifeCycle(SDK::MessageBase* msg)
                 }
                 mLifeCycleCb->onGlanceRun(mBase);
             }
+
+            // Last, so the line's own cost is not charged to the start. "queued"
+            // is the wait behind other requests, "load" reading the service in
+            // (none when it was already running).
+            const uint32_t nowMs = OS::GetTimeMs();
+            GLANCE_TIMING_LOG("[%s] run %s: queued %lu ms, load %lu ms%s, t+%lu\n",
+                    mInfo.name, status ? "ok" : "FAILED",
+                    static_cast<unsigned long>(GlanceTiming::ElapsedMs(
+                            mGlanceRunRequestMs.load(std::memory_order_relaxed), enteredMs)),
+                    static_cast<unsigned long>(GlanceTiming::ElapsedMs(enteredMs, loadedMs)),
+                    isSrvWasRun ? " (was running)" : "",
+                    static_cast<unsigned long>(GlanceTiming::SinceOpenMs(nowMs)));
         } break;
 
         case App::InternalMessageType::APP_GLANCE_STOP: {
@@ -1841,6 +1860,19 @@ void AppInstance::appMsgHandler(SDK::MessageBase* msg)
             }
 
             mMessageMgr.signalCompletion(msg, SDK::MessageResult::SUCCESS);
+
+            // The first two only: an app's first update is usually its
+            // placeholder and the second its first real value, which is the
+            // pair the Glances screen waits for. After the completion, so the
+            // app is not kept waiting while the line goes out.
+            const uint32_t updates = ++mGlanceUpdates;
+            if (updates <= 2) {
+                const uint32_t nowMs = OS::GetTimeMs();
+                GLANCE_TIMING_LOG("[%s] update #%lu: %lu ms after run, t+%lu\n",
+                        mInfo.name, static_cast<unsigned long>(updates),
+                        static_cast<unsigned long>(GlanceTiming::ElapsedMs(mGlanceStartMs, nowMs)),
+                        static_cast<unsigned long>(GlanceTiming::SinceOpenMs(nowMs)));
+            }
         } break;
 
         case SDK::MessageType::REQUEST_WIDGET_START: {

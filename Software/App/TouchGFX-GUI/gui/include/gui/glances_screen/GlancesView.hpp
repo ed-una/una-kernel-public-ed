@@ -22,6 +22,9 @@ protected:
 
     uint16_t mCounter = Gui::Config::kGlanceScreenTimeout;
     uint16_t mGlanceUpdCounter = GUI_CONFIG_MS_2_TICKS(950); // first update will be in 50ms
+
+    /// Frames drawn since the screen opened, for the GlanceTiming lines.
+    uint32_t mFramesSinceOpen = 0;
     virtual void handleTickEvent() override;
 };
 

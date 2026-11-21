@@ -112,7 +112,13 @@ public:
 
     void stopAll();
 
-    void startGlances();
+    /**
+     * @brief   Ask every glance app to start its glance.
+     * @retval  How many were asked, for the GlanceTiming lines. Each request
+     *          is sent without waiting, so this says nothing about whether
+     *          they have started.
+     */
+    uint32_t startGlances();
     void stopGlances();
 
     /**

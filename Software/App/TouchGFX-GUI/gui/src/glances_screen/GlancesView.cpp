@@ -1,4 +1,9 @@
+// Before every include: the view's headers bring the logger in through
+// MenuGlances.hpp, and it names the module "GUI" if nothing has by then.
+#define LOG_MODULE_PRX      "GUI.Glances"
+
 #include <gui/glances_screen/GlancesView.hpp>
+#include "gui/common/GuiLogger.hpp"
 
 GlancesView::GlancesView()
 {
@@ -29,7 +34,19 @@ uint16_t GlancesView::getPositionId()
 
 void GlancesView::updAppList(const std::shared_ptr<std::vector<App::GlanceData>> &list)
 {
+    const int16_t itemsBefore = menu.getNumberOfItems();
     menu.updAppList(list);
+
+    // Counted in frames, the unit the screen is drawn in: frame 1 is the first
+    // one after the screen opened. Lists arrive in the model's tick, which runs
+    // before this screen's, so this frame is one more than the screen has
+    // counted. A change in the item count is what makes the wheel jump, so it
+    // is printed before and after.
+    LOG_DEBUG("GlanceTiming: list applied at frame %lu: %lu glances, items %d -> %d\n",
+              static_cast<unsigned long>(mFramesSinceOpen + 1),
+              static_cast<unsigned long>(list ? list->size() : 0),
+              static_cast<int>(itemsBefore),
+              static_cast<int>(menu.getNumberOfItems()));
 }
 
 void GlancesView::setNotifications(uint32_t callsNum, uint32_t emailsNum, uint32_t msgsNum)
@@ -63,6 +80,8 @@ void GlancesView::handleKeyEvent(uint8_t key)
 
 void GlancesView::handleTickEvent()
 {
+    mFramesSinceOpen++;
+
     if (mCounter > 0) {
         mCounter--;
     }

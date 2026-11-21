@@ -784,14 +784,18 @@ void Manager::stopAll()
 // which the header says nothing about. Every app carrying the legacy bit would
 // be started on every visit to the glances screen and left to release itself by
 // code that was never written for the case.
-void Manager::startGlances()
+uint32_t Manager::startGlances()
 {
     LOG_INFO("Start all glances\n");
+    uint32_t asked = 0;
     for (auto &app : mApps) {
         if (app.getType() == App::Type::kGlance) {
-            app.runGlance();
+            if (app.runGlance()) {
+                asked++;
+            }
         }
     }
+    return asked;
 }
 
 // Every app rather than the one that reported: the reports are coalesced into

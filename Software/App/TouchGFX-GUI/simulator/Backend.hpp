@@ -40,6 +40,7 @@ public:
         updTime();
         updGps();
         updMag();
+        stepGlances();
 
 
 
@@ -238,33 +239,15 @@ public:
                     // No confirmation, just stop app
                 } else if constexpr (std::is_same_v<T, G2BEvent::UserAppGlancesStart>) {
                     LOG_DEBUG("Backend. UserAppGlancesStart\n");
-                    mGlanceCounter = 0;
+                    glancesOpen();
 
                 } else if constexpr (std::is_same_v<T, G2BEvent::UserAppGlancesStop>) {
                     LOG_DEBUG("Backend. UserAppGlancesStop\n");
+                    glancesClose();
 
                 } else if constexpr (std::is_same_v<T, G2BEvent::UserAppGlancesListReq>) {
                     LOG_DEBUG("Backend. UserAppGlancesListReq\n");
-
-                    B2GEvent::UserAppGlanceList rsp{};
-
-                    std::vector<App::GlanceData> v;
-                    v.reserve(skGlancesCount);
-
-                    if (mGlanceCounter > 0) {
-                        for (uint32_t i = 0; i < skGlancesCount; ++i) {
-                            mGlance[i].glanceUpdate();
-                            v.push_back(mGlance[i].getData());
-                            if (i == mGlanceCounter) {
-                                break;
-                            }
-                        }
-                    }
-                    rsp.list = std::make_shared<std::vector<App::GlanceData>>(v);
-
-                    sendToGui(rsp);
-
-                    mGlanceCounter++;
+                    sendGlanceList("request");
                 }
             }, data);
         }
@@ -458,8 +441,158 @@ public:
     }
 
 private:
-    static constexpr uint32_t skGlancesCount = 3;
-    uint32_t mGlanceCounter = 0;
+    // Glances
+    //
+    // A model of the kernel's side of the Glances screen, so the simulator
+    // shows the screen's real timing rather than one of its own. On the
+    // watch:
+    //  - opening the screen asks every glance app to start. Each one's service
+    //    is read off the eMMC first, one after another. skGlanceLoadTicks is a
+    //    guess at how long each takes, until the watch's GlanceTiming lines
+    //    give the real figure;
+    //  - a started app is ticked once straight away and answers with its
+    //    placeholder, because its sensor value is still queued behind that
+    //    tick. The value arrives a tick later;
+    //  - after that it is ticked once a second, by one timer that all glance
+    //    apps share and that started with the first of them, and it sends its
+    //    value on the first of those ticks after the value arrived;
+    //  - every app exits when the screen closes, taking what it sent with it;
+    //  - the GUI sees only the lists it asks for, and they hold only apps that
+    //    are running and have sent something.
+    // Ticks here are the GUI's, 100 ms each.
+    static constexpr uint32_t skGlancesCount    = 3;
+    static constexpr uint32_t skGlanceLoadTicks = 2;    // 200 ms per app, a guess
+    static constexpr uint32_t skGlanceTickTicks = 10;   // the kernel's 1 Hz glance tick
+    static constexpr uint32_t skMsPerTick       = 1000 / App::kFrameRate;
+
+    struct MockGlanceApp {
+        enum class State { Off, Loading, Running };
+        State    state      = State::Off;
+        uint32_t readyTick  = 0;      // when its load finishes
+        uint32_t startTick  = 0;      // when its glance started
+        bool     valueReady = false;  // its sensor value has arrived
+        uint32_t updates    = 0;      // updates sent since its glance started
+    };
+
+    bool          mGlancesOpen        = false;
+    uint32_t      mGlanceTick         = 0;      // ticks since the screen opened
+    bool          mGlanceTimerRunning = false;
+    uint32_t      mGlanceTimerPhase   = 0;      // tick the shared 1 Hz timer started on
+    uint32_t      mGlanceListsSent    = 0;
+    MockGlanceApp mGlanceApp[skGlancesCount];
+
+    void glancesOpen()
+    {
+        mGlancesOpen        = true;
+        mGlanceTick         = 0;
+        mGlanceTimerRunning = false;
+        mGlanceListsSent    = 0;
+        for (uint32_t i = 0; i < skGlancesCount; ++i) {
+            mGlanceApp[i]           = MockGlanceApp{};
+            mGlanceApp[i].state     = MockGlanceApp::State::Loading;
+            mGlanceApp[i].readyTick = (i + 1) * skGlanceLoadTicks;
+            mGlance[i].setPlaceholder();
+        }
+        LOG_DEBUG("GlanceTiming: [mock kernel] open: %u glance apps asked to start\n",
+                  static_cast<unsigned>(skGlancesCount));
+    }
+
+    void glancesClose()
+    {
+        mGlancesOpen = false;
+        for (uint32_t i = 0; i < skGlancesCount; ++i) {
+            mGlanceApp[i] = MockGlanceApp{};
+            mGlance[i].clearStored();
+        }
+        LOG_DEBUG("GlanceTiming: [mock kernel] close: %u lists sent, t+%u\n",
+                  static_cast<unsigned>(mGlanceListsSent),
+                  static_cast<unsigned>(mGlanceTick * skMsPerTick));
+    }
+
+    // The app's REQUEST_GLANCE_UPDATE: the kernel keeps a copy.
+    void glanceSend(uint32_t i)
+    {
+        MockGlanceApp &a = mGlanceApp[i];
+        mGlance[i].store();
+        a.updates++;
+        if (a.updates <= 2) {
+            LOG_DEBUG("GlanceTiming: [mock kernel] [glance_%u] update #%u: %u ms after run, t+%u\n",
+                      static_cast<unsigned>(i), static_cast<unsigned>(a.updates),
+                      static_cast<unsigned>((mGlanceTick - a.startTick) * skMsPerTick),
+                      static_cast<unsigned>(mGlanceTick * skMsPerTick));
+        }
+    }
+
+    // EVENT_GLANCE_TICK, as the stock glance apps answer it: they send only
+    // when something changed, so the placeholder first, then the value once
+    // it has arrived (the mock's value is a clock, so it changes every time).
+    void glanceTick(uint32_t i)
+    {
+        MockGlanceApp &a = mGlanceApp[i];
+        if (a.updates == 0) {
+            glanceSend(i);
+        } else if (a.valueReady) {
+            mGlance[i].glanceUpdate();
+            glanceSend(i);
+        }
+    }
+
+    void stepGlances()
+    {
+        if (!mGlancesOpen) {
+            return;
+        }
+        mGlanceTick++;
+
+        for (uint32_t i = 0; i < skGlancesCount; ++i) {
+            MockGlanceApp &a = mGlanceApp[i];
+            if (a.state == MockGlanceApp::State::Loading && mGlanceTick >= a.readyTick) {
+                a.state     = MockGlanceApp::State::Running;
+                a.startTick = mGlanceTick;
+                if (!mGlanceTimerRunning) {
+                    mGlanceTimerRunning = true;
+                    mGlanceTimerPhase   = mGlanceTick;
+                }
+                LOG_DEBUG("GlanceTiming: [mock kernel] [glance_%u] run ok: load %u ms, t+%u\n",
+                          static_cast<unsigned>(i),
+                          static_cast<unsigned>(skGlanceLoadTicks * skMsPerTick),
+                          static_cast<unsigned>(mGlanceTick * skMsPerTick));
+                glanceTick(i);    // the kernel's first tick, sent straight away
+            } else if (a.state == MockGlanceApp::State::Running && mGlanceTick > a.startTick) {
+                a.valueReady = true;
+            }
+        }
+
+        if (mGlanceTimerRunning && mGlanceTick != mGlanceTimerPhase &&
+                (mGlanceTick - mGlanceTimerPhase) % skGlanceTickTicks == 0) {
+            for (uint32_t i = 0; i < skGlancesCount; ++i) {
+                if (mGlanceApp[i].state == MockGlanceApp::State::Running) {
+                    glanceTick(i);
+                }
+            }
+        }
+    }
+
+    void sendGlanceList(const char *reason)
+    {
+        std::vector<App::GlanceData> v;
+        v.reserve(skGlancesCount);
+        for (uint32_t i = 0; i < skGlancesCount; ++i) {
+            if (mGlanceApp[i].state == MockGlanceApp::State::Running &&
+                    mGlance[i].stored().count > 0) {
+                v.push_back(mGlance[i].stored());
+            }
+        }
+
+        B2GEvent::UserAppGlanceList rsp{};
+        rsp.list = std::make_shared<std::vector<App::GlanceData>>(v);
+        sendToGui(rsp);
+
+        LOG_DEBUG("GlanceTiming: [mock kernel] list #%u (%s): %u items, t+%u\n",
+                  static_cast<unsigned>(++mGlanceListsSent), reason,
+                  static_cast<unsigned>(v.size()),
+                  static_cast<unsigned>(mGlanceTick * skMsPerTick));
+    }
 
     Backend()
     {
@@ -794,6 +927,18 @@ private:
     public:
         GlanceProvider(){}
 
+        // What the kernel holds: a copy taken when the app last sent.
+        void store() { mStored = getData(); }
+        void clearStored() { mStored = App::GlanceData{}; }
+        const App::GlanceData &stored() const { return mStored; }
+
+        // What a stock glance shows before its sensor value arrives.
+        void setPlaceholder()
+        {
+            mTextTime.setText("---");
+            mTextTemperature.setText("---");
+        }
+
         App::GlanceData getData() {
             App::GlanceData d{};
             d.count = static_cast<uint8_t>(mUI.size());
@@ -884,6 +1029,7 @@ private:
         SDK::Glance::ControlText mTextTime;
         SDK::Glance::ControlText mTextTemperature;
         float                    mTemperature;
+        App::GlanceData          mStored{};
     };
 
     GlanceProvider mGlance[skGlancesCount];

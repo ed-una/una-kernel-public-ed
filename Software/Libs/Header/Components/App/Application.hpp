@@ -343,6 +343,19 @@ protected:
     uint32_t mGlanceTickNumber;
     uint32_t mStartGuiTime;
 
+    /// When the kernel asked for the glance to run, so the app thread can say
+    /// how long the request waited in its queue. Written on the Backend thread
+    /// and read on the app thread, hence atomic. Only read for the
+    /// GlanceTiming lines.
+    std::atomic<uint32_t> mGlanceRunRequestMs {0};
+
+    /// When the glance last started, and how many updates the app has sent
+    /// since: the first update is usually a placeholder, the second its first
+    /// real value, and the time to each is what the Glances screen waits for.
+    /// App thread only.
+    uint32_t mGlanceStartMs = 0;
+    uint32_t mGlanceUpdates = 0;
+
     enum class AppPartState {
         NONE,
         RUN,

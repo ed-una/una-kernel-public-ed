@@ -45,6 +45,7 @@
 
 #include "App/AppSorter.hpp"
 #include "App/AppSorterFreqUse.hpp"
+#include "App/GlanceTimingLog.hpp"
 
 #include "flash_diskio.h"
 
@@ -1156,8 +1157,19 @@ void Backend::guiHandler(const G2BEvent::UserAppGlancesStart &evt)
 {
     LOG_DEBUG("UserAppGlancesStart\n");
 
+    // Every GlanceTiming line of this visit counts from here.
+    const uint32_t openedMs = OS::GetTimeMs();
+    App::GlanceTiming::gOpenedAtMs.store(openedMs, std::memory_order_relaxed);
+    mGlanceListsSent = 0;
+
     App::Manager& appmgr = App::Manager::GetInstance();
-    appmgr.startGlances();
+    const uint32_t asked = appmgr.startGlances();
+
+    // How long this held the Backend thread: the GUI's first list request is
+    // queued behind it, so it is the first thing the screen waits for.
+    GLANCE_TIMING_LOG("open: %lu glance apps asked to start in %lu ms\n",
+            static_cast<unsigned long>(asked),
+            static_cast<unsigned long>(App::GlanceTiming::ElapsedMs(openedMs, OS::GetTimeMs())));
 }
 
 void Backend::guiHandler(const G2BEvent::UserAppGlancesStop &evt)
@@ -1166,6 +1178,10 @@ void Backend::guiHandler(const G2BEvent::UserAppGlancesStop &evt)
 
     App::Manager& appmgr = App::Manager::GetInstance();
     appmgr.stopGlances();
+
+    GLANCE_TIMING_LOG("close: %lu lists sent, t+%lu\n",
+            static_cast<unsigned long>(mGlanceListsSent),
+            static_cast<unsigned long>(App::GlanceTiming::SinceOpenMs(OS::GetTimeMs())));
 }
 
 void Backend::guiHandler(const G2BEvent::UserAppGlancesListReq &evt)
@@ -1173,12 +1189,22 @@ void Backend::guiHandler(const G2BEvent::UserAppGlancesListReq &evt)
     LOG_DEBUG("UserAppListGlancesReq\n");
     App::Manager& appmgr = App::Manager::GetInstance();
 
+    const uint32_t startMs = OS::GetTimeMs();
     B2GEvent::UserAppGlanceList rsp {};
     rsp.list = std::make_shared<std::vector<App::GlanceData>>(appmgr.getGlancesData());
 
     sortGlances(*rsp.list);
 
-    sendEventToGui(rsp);
+    const size_t items = rsp.list->size();
+    const bool sent = sendEventToGui(rsp);
+
+    const uint32_t nowMs = OS::GetTimeMs();
+    GLANCE_TIMING_LOG("list #%lu (request): %lu items, built in %lu ms%s, t+%lu\n",
+            static_cast<unsigned long>(++mGlanceListsSent),
+            static_cast<unsigned long>(items),
+            static_cast<unsigned long>(App::GlanceTiming::ElapsedMs(startMs, nowMs)),
+            sent ? "" : ", DROPPED (GUI queue full)",
+            static_cast<unsigned long>(App::GlanceTiming::SinceOpenMs(nowMs)));
 }
 
 void Backend::guiHandler(const G2BEvent::UserAppPause &evt)
