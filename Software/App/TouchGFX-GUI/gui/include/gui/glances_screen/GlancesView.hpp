@@ -15,6 +15,10 @@ public:
     void setPositionId(uint16_t id);
     uint16_t getPositionId();
 
+    /// The selected item by identity (App::GlanceListOrder), not by place.
+    void selectGlance(uint32_t id);
+    uint32_t getSelectedGlance();
+
     void setNotifications(uint32_t callsNum, uint32_t emailsNum, uint32_t msgsNum);
     void updAppList(const std::shared_ptr<std::vector<App::GlanceData>> &list);
 

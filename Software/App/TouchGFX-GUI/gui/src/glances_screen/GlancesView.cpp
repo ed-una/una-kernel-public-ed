@@ -32,6 +32,16 @@ uint16_t GlancesView::getPositionId()
     return menu.getSelectedItem();
 }
 
+void GlancesView::selectGlance(uint32_t id)
+{
+    menu.selectGlance(id);
+}
+
+uint32_t GlancesView::getSelectedGlance()
+{
+    return menu.getSelectedGlance();
+}
+
 void GlancesView::updAppList(const std::shared_ptr<std::vector<App::GlanceData>> &list)
 {
     const int16_t itemsBefore = menu.getNumberOfItems();
@@ -89,6 +99,9 @@ void GlancesView::handleKeyEvent(uint8_t key)
 void GlancesView::handleTickEvent()
 {
     mFramesSinceOpen++;
+
+    // A list that came in during a scroll, now that the wheel has settled.
+    menu.applyPendingList();
 
     if (mCounter > 0) {
         mCounter--;

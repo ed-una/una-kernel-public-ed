@@ -45,6 +45,12 @@ public:
     uint32_t getPosNotificationListUid();
     void setPosMenuGlances(uint16_t p);
     uint16_t getPosMenuGlances();
+
+    /// The Glances item selected when the screen was last left, by identity
+    /// (App::GlanceListOrder): an app's PID, or 0 for Notifications. By app
+    /// rather than by row, so it survives a glance being added or removed.
+    void setGlancesSelected(uint32_t id) { mMenuPosition.glancesId = id; }
+    uint32_t getGlancesSelected() const { return mMenuPosition.glancesId; }
     void setPosMenuBleFCC(uint16_t p);
     uint16_t getPosMenuBleFCC();
     void setPosMenuGNSS(uint16_t p);
@@ -430,6 +436,7 @@ protected:
         uint16_t tracking = 0;
         uint32_t notificationListUid = 0;  // Position determinates by UID
         uint16_t glances = 0;
+        uint32_t glancesId = 0;     // Notifications
         uint16_t bleFCC = 0;
         uint16_t gnss = 0;
         uint16_t clock = 0;

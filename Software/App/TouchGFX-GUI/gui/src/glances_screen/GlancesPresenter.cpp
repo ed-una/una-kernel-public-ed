@@ -26,8 +26,9 @@ void GlancesPresenter::activate()
         view.showKeptList(last);
     }
 
-    // Set current menu position
-    view.setPositionId(model->getPosMenuGlances());
+    // The item the user was on, by app: selected now if the kept list has
+    // it, otherwise as soon as a list does.
+    view.selectGlance(model->getGlancesSelected());
 
     // Reset nested menu position
     model->setPosNotificationListUid(0);
@@ -45,7 +46,7 @@ void GlancesPresenter::activate()
 
 void GlancesPresenter::deactivate()
 {
-    model->setPosMenuGlances(view.getPositionId());
+    model->setGlancesSelected(view.getSelectedGlance());
     // Stop Glances
     model->appGlancesStop();
 }

@@ -1,5 +1,13 @@
 #include <gui/containers/MenuGlances.hpp>
 #include "gui/common/GuiLogger.hpp"
+#include "Components/Shared/GlanceListOrder.hpp"
+
+#include <algorithm>
+#include <cstring>
+
+namespace {
+const std::vector<App::GlanceData> kNoGlances;
+}
 
 MenuGlances::MenuGlances()
 {
@@ -36,35 +44,88 @@ void MenuGlances::setNotifications(uint32_t callsNum, uint32_t emailsNum, uint32
 
 void MenuGlances::updAppList(const std::shared_ptr<std::vector<App::GlanceData>> &list)
 {
-    const auto applyWheelMode = [this](int16_t itemsCount) {
-        wheel.setCircular(itemsCount >= 2);
-        wheel.setNumberOfItems(itemsCount);
-        sideBar.setCount(itemsCount);
-    };
-
-    //mAppList = list;
-    if (list == nullptr || list->empty()) {
-        applyWheelMode(1); // 0 - notifications
-        selectItem(0);
-        clearGlanceControls();
-        update();
+    // Not in the middle of a scroll: changing the rows under a moving wheel
+    // would land it somewhere the user did not ask for. The newest list waits
+    // for the wheel to settle (applyPendingList()); older ones are dropped.
+    if (wheel.isAnimating()) {
+        mPendingList = list;
+        mHasPendingList = true;
         return;
     }
+    mHasPendingList = false;
+    mPendingList.reset();
+    applyList(list);
+}
 
-    int16_t itemsNum = static_cast<int16_t>(1 + list->size()); // 0 - notifications
-
-    if (mWidgetsPool.empty()) {
-        createGlanceControls(list);
-        applyWheelMode(itemsNum);
-    } else if (mWidgetsPool.size() != list->size()) {
-        clearGlanceControls();
-        createGlanceControls(list);
-        applyWheelMode(itemsNum);
+void MenuGlances::applyPendingList()
+{
+    if (!mHasPendingList || wheel.isAnimating()) {
+        return;
     }
-    
+    mHasPendingList = false;
+    const std::shared_ptr<std::vector<App::GlanceData>> list = std::move(mPendingList);
+    applyList(list);
+}
+
+void MenuGlances::applyList(const std::shared_ptr<std::vector<App::GlanceData>> &list)
+{
+    const std::vector<App::GlanceData> &items = list ? *list : kNoGlances;
+
+    // What is on screen now, by identity, before the rows change under it.
+    const int16_t oldRow = wheel.getSelectedItem();
+    const uint32_t shownId = getSelectedGlance();
+    const int16_t oldCount = wheel.getNumberOfItems();
+
+    reconcileGlanceControls(items);
+    mList = list;
+
+    const int16_t count = static_cast<int16_t>(Id::COUNT + items.size());
+    if (count != oldCount) {
+        // Circular first: setNumberOfItems() moves a wheel that is not.
+        wheel.setCircular(count >= 2);
+        wheel.setNumberOfItems(count);
+        sideBar.setCount(count);
+    }
+
+    // The same item, wherever it now is; or the item asked for by
+    // selectGlance(), the first time a list has it.
+    int16_t row = App::GlanceListOrder::KeepRow(items, shownId, oldRow);
+    if (mWantedId != kNoWantedId) {
+        const int16_t wanted = App::GlanceListOrder::FindRow(items, mWantedId);
+        if (wanted >= 0) {
+            row = wanted;
+            mWantedId = kNoWantedId;
+        }
+    }
+    if (row != wheel.getSelectedItem()) {
+        wheel.animateToItem(row, 0);
+    }
+    sideBar.setActiveId(row);
+
     updateGlanceControls(list);
 
     update();
+}
+
+void MenuGlances::selectGlance(uint32_t id)
+{
+    const int16_t row = App::GlanceListOrder::FindRow(mList ? *mList : kNoGlances, id);
+    if (row < 0) {
+        // Not listed yet: taken up by the first list that has it.
+        mWantedId = id;
+        return;
+    }
+    mWantedId = kNoWantedId;
+    if (row != wheel.getSelectedItem()) {
+        wheel.animateToItem(row, 0);
+    }
+    sideBar.setActiveId(row);
+    update();
+}
+
+uint32_t MenuGlances::getSelectedGlance()
+{
+    return App::GlanceListOrder::IdAtRow(mList ? *mList : kNoGlances, wheel.getSelectedItem());
 }
 
 
@@ -79,6 +140,9 @@ void MenuGlances::selectNext()
         return;
     }
 
+    // The user's choice now: an item still waiting to be restored is not.
+    mWantedId = kNoWantedId;
+
     int16_t p = wheel.getSelectedItem() + 1;
     wheel.animateToItem(p, Gui::Config::kGlancesAnimationSteps);
     sideBar.animateToId(p, Gui::Config::kGlancesAnimationSteps);
@@ -91,6 +155,8 @@ void MenuGlances::selectPrev()
     if (wheel.getNumberOfItems() <= 1) {
         return;
     }
+
+    mWantedId = kNoWantedId;
 
     int16_t p = wheel.getSelectedItem() - 1;
     wheel.animateToItem(p, Gui::Config::kGlancesAnimationSteps);
@@ -217,48 +283,64 @@ void MenuGlances::clearGlanceControls()
     mWidgetsPool.clear();
 }
 
-void MenuGlances::createGlanceControls(const std::shared_ptr<std::vector<App::GlanceData>> &list)
+void MenuGlances::reconcileGlanceControls(const std::vector<App::GlanceData> &list)
 {
-    if (!mWidgetsPool.empty()) {
-        return;
-    }
-
-    mWidgetsPool.reserve(list->size());
-
-    for (size_t i = 0; i < list->size(); i++) {
-        const auto& ctrls = (*list)[i];
-
-        // Every entry gets a row, an empty one included: the kernel sends a
-        // glance with no controls while its app starts on the first visit
-        // after boot, so its name is listed from the start. Skipping it would
-        // leave the rows and the list out of step.
-        DrawableGlanceData &newGlance = mWidgetsPool.emplace_back();
-        snprintf(newGlance.altname, sizeof(newGlance.altname), "%s", ctrls.altname);
-
-        for (uint8_t c = 0; c < ctrls.count; c++) {
-            Drawable* drawable = create(ctrls.ctrls[c]);
-            if (drawable) {
-                DrawableGlanceData::ControlMapItem item{};
-                item.id = ctrls.ctrls[c].id;
-                item.d = drawable;
-                newGlance.controlMap.push_back(item);
-
-                //LOG_DEBUG("new control: %s, id=%d, 0x%08X\n", newGlance.altname, item.id, item.d);
-            }
+    // Nothing may still show a drawable that is about to go; update() puts
+    // back the ones that stay.
+    for (int i = 0; i < wheelSelectedListItems.getNumberOfDrawables(); ++i) {
+        MenuGlancesCenterItem* center = static_cast<MenuGlancesCenterItem*>(
+            wheelSelectedListItems.getDrawable(i));
+        if (center) {
+            center->removeAll();
         }
     }
 
-    // verify
-    //for (auto& glance : mWidgetsPool) {
-    //    for (DrawableGlanceData::ControlMapItem& item : glance.controlMap) {
-    //        LOG_DEBUG("verify     : %s, id=%d, 0x%08X\n", glance.altname, item.id, item.d);
-    //    }
-    //}
+    const auto sameApp = [](const DrawableGlanceData &row, const App::GlanceData &g) {
+        return (row.pid != 0 || g.pid != 0) ? row.pid == g.pid
+                                            : std::strncmp(row.altname, g.altname, sizeof(row.altname)) == 0;
+    };
+
+    // Rows in the new list's order. A row whose app is still listed keeps its
+    // drawables, so a list that only adds or drops one glance rebuilds none
+    // of the others. Every entry gets a row, an empty one included: the
+    // kernel lists a glance by name alone while its app starts on the first
+    // visit after boot. Controls are made or brought up to date afterwards,
+    // by updateGlanceControls().
+    std::vector<DrawableGlanceData> rows;
+    rows.reserve(list.size());
+    std::vector<bool> taken(mWidgetsPool.size(), false);
+    for (const App::GlanceData &g : list) {
+        size_t j = 0;
+        while (j < mWidgetsPool.size() && (taken[j] || !sameApp(mWidgetsPool[j], g))) {
+            ++j;
+        }
+        if (j < mWidgetsPool.size()) {
+            taken[j] = true;
+            rows.push_back(std::move(mWidgetsPool[j]));
+            mWidgetsPool[j].controlMap.clear();
+        } else {
+            DrawableGlanceData &row = rows.emplace_back();
+            row.pid = g.pid;
+            snprintf(row.altname, sizeof(row.altname), "%s", g.altname);
+        }
+    }
+
+    // The apps no longer listed.
+    for (size_t j = 0; j < mWidgetsPool.size(); ++j) {
+        if (taken[j]) {
+            continue;
+        }
+        for (DrawableGlanceData::ControlMapItem &item : mWidgetsPool[j].controlMap) {
+            delete item.d;
+            item.d = nullptr;
+        }
+    }
+    mWidgetsPool = std::move(rows);
 }
 
 void MenuGlances::updateGlanceControls(const std::shared_ptr<std::vector<App::GlanceData>> &list)
 {
-    if (mWidgetsPool.empty() || mWidgetsPool.size() != list->size()) {
+    if (!list || mWidgetsPool.size() != list->size()) {
         return;
     }
 
@@ -294,6 +376,18 @@ void MenuGlances::updateGlanceControls(const std::shared_ptr<std::vector<App::Gl
                     // and update() is what puts it right.
                     update(ctrls.ctrls[c], drawable);
                 }
+            }
+        }
+        // Controls the app no longer sends.
+        for (auto it = existGlance.controlMap.begin(); it != existGlance.controlMap.end();) {
+            const uint32_t id = it->id;
+            const bool sent = std::any_of(ctrls.ctrls, ctrls.ctrls + ctrls.count,
+                [id](const GlanceControl_t &c) { return c.id == id; });
+            if (sent) {
+                ++it;
+            } else {
+                delete it->d;
+                it = existGlance.controlMap.erase(it);
             }
         }
     }

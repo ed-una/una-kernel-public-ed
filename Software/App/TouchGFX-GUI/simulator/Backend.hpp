@@ -265,6 +265,12 @@ public:
     {
         LOG_DEBUG("%c\n", c);
 
+        // Glances: x makes glance_1's app exit, or start again, so the list
+        // can be seen losing and regaining an entry while it is on screen.
+        if ('x' == c && mGlancesOpen) {
+            glanceToggleExit(1);
+        }
+
         // Battery level
         if ('+' == c) {
             if (mBatteryLevel < 100) { 
@@ -532,6 +538,25 @@ private:
         LOG_DEBUG("GlanceTiming: [mock kernel] close: %u lists sent, t+%u\n",
                   static_cast<unsigned>(mGlanceListsSent),
                   static_cast<unsigned>(mGlanceTick * skMsPerTick));
+    }
+
+    void glanceToggleExit(uint32_t i)
+    {
+        MockGlanceApp &a = mGlanceApp[i];
+        if (a.state != MockGlanceApp::State::Off) {
+            a = MockGlanceApp{};
+            mGlance[i].clearStored();
+            LOG_DEBUG("GlanceTiming: [mock kernel] [glance_%u] exited, t+%u\n",
+                      static_cast<unsigned>(i), static_cast<unsigned>(mGlanceTick * skMsPerTick));
+        } else {
+            a.state     = MockGlanceApp::State::Loading;
+            a.readyTick = mGlanceTick + skGlanceLoadTicks;
+            LOG_DEBUG("GlanceTiming: [mock kernel] [glance_%u] starting again, t+%u\n",
+                      static_cast<unsigned>(i), static_cast<unsigned>(mGlanceTick * skMsPerTick));
+        }
+        if (mGlanceSignal.markDirty()) {
+            sendGlanceList("push");
+        }
     }
 
     // The app's REQUEST_GLANCE_UPDATE: the kernel keeps a copy.

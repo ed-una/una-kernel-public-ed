@@ -150,6 +150,7 @@ add_executable(una-host-tests
     kernel/FaceTilt_test.cpp
     kernel/FramePacer_test.cpp
     kernel/GlanceCache_test.cpp
+    kernel/GlanceListOrder_test.cpp
     kernel/GlanceListSignal_test.cpp
     kernel/GlanceSelect_test.cpp
     kernel/GlanceSettle_test.cpp

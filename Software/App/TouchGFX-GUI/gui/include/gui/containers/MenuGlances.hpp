@@ -22,7 +22,30 @@ public:
     };
 
     void setNotifications(uint32_t callsNum, uint32_t emailsNum, uint32_t msgsNum);
+
+    /**
+     * @brief   Show a new glance list without moving the user.
+     * @details The wheel stays on the same item, matched by app, wherever the
+     *          new list puts it, and only rows whose app came or went are
+     *          rebuilt. A list that arrives during a scroll waits for it to
+     *          end (applyPendingList()).
+     */
     void updAppList(const std::shared_ptr<std::vector<App::GlanceData>> &list);
+
+    /// Apply a list that arrived during a scroll, once the wheel has settled.
+    /// Call every tick.
+    void applyPendingList();
+
+    /**
+     * @brief   Select an item by identity (App::GlanceListOrder): a glance
+     *          app's PID, or kNotifications.
+     * @details If it is not listed yet, the first list that has it selects it,
+     *          unless the user has moved by then.
+     */
+    void selectGlance(uint32_t id);
+
+    /// The identity of the selected item, for selectGlance() on the next visit.
+    uint32_t getSelectedGlance();
 
 
     int16_t getNumberOfItems();
@@ -176,8 +199,8 @@ protected:
         }
     };
 
+    void applyList(const std::shared_ptr<std::vector<App::GlanceData>> &list);
     void clearGlanceControls();
-    void createGlanceControls(const std::shared_ptr<std::vector<App::GlanceData>> &list);
     void updateGlanceControls(const std::shared_ptr<std::vector<App::GlanceData>> &list);
 
     struct DrawableGlanceData {
@@ -187,8 +210,23 @@ protected:
         };
         std::vector<ControlMapItem> controlMap;
         char altname[App::kNameLen]{};
+        uint32_t pid = 0;   ///< the glance app's service PID, its identity
     };
     std::vector<DrawableGlanceData> mWidgetsPool;
+
+    /// Make the rows follow @p list, by app.
+    void reconcileGlanceControls(const std::vector<App::GlanceData> &list);
+
+    /// The list on screen, for finding an item's row by identity.
+    std::shared_ptr<std::vector<App::GlanceData>> mList;
+
+    /// The newest list that arrived during a scroll (may be null: no glances).
+    std::shared_ptr<std::vector<App::GlanceData>> mPendingList;
+    bool mHasPendingList = false;
+
+    /// An item to select as soon as a list has it (selectGlance()).
+    static constexpr uint32_t kNoWantedId = 0xFFFFFFFFu;
+    uint32_t mWantedId = kNoWantedId;
 
 
     Drawable* create(const GlanceControl_t& ctrl);
