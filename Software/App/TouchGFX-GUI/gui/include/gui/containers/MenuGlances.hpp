@@ -4,6 +4,7 @@
 #include <gui_generated/containers/MenuGlancesBase.hpp>
 #include <touchgfx/widgets/canvas/Line.hpp>
 #include <touchgfx/widgets/BoxWithBorder.hpp>
+#include <gui/containers/GlanceScrollFx.hpp>
 
 #include "gui/common/GuiLogger.hpp"
 
@@ -53,6 +54,13 @@ public:
     void selectNext();
     void selectPrev();
     void selectItem(int16_t itemIndex);
+
+    /// Advance the scroll transition. Call every tick.
+    void tickScrollFx();
+
+    /// The next scroll transition (Gui::Config::kGlancesScrollFx). Simulator
+    /// only, for comparing them in one build.
+    void cycleScrollFx();
     uint16_t getSelectedItem();
 
     bool isNotificationSelected();
@@ -65,6 +73,16 @@ protected:
     virtual void wheelUpdateCenterItem(MenuGlancesCenterItem &item, int16_t itemIndex) override;
 
     void update();
+
+    /// One press of L1 or L2: @p direction +1 next, -1 previous.
+    void scrollBy(int8_t direction);
+
+    /// A wheel animation or a scroll transition is under way: a new list
+    /// waits for it (applyPendingList()).
+    bool isScrolling() const;
+
+    /// Drawn over the centre item when a scroll transition is chosen.
+    GlanceScrollFx mScrollFx;
 
     uint32_t mNotifCallsNum = 0;
     uint32_t mNotifEmailsNum = 0;

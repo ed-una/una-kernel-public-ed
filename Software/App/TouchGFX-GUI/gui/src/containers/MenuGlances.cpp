@@ -32,6 +32,38 @@ void MenuGlances::initialize()
     wheel.setNumberOfItems(Id::COUNT);
     wheel.setCircular(false);
     sideBar.setCount(Id::COUNT);
+
+    // Over everything, on the wheel's selected item. Added in the simulator
+    // whatever the setting, so the v key can bring any variant in.
+#if !defined(SIMULATOR)
+    if (Gui::Config::kGlancesScrollFx != GlanceScrollFx::kNone)
+#endif
+    {
+        constexpr int16_t kSelectedItemOffset = 49;   // MenuGlancesBase: wheel.setSelectedItemOffset()
+        mScrollFx.setPosition(GlanceScrollFx::kX, wheel.getY() + kSelectedItemOffset,
+                              GlanceScrollFx::kWidth, GlanceScrollFx::kHeight);
+        mScrollFx.setVariant(static_cast<GlanceScrollFx::Variant>(Gui::Config::kGlancesScrollFx));
+        add(mScrollFx);
+    }
+}
+
+bool MenuGlances::isScrolling() const
+{
+    return wheel.isAnimating() || mScrollFx.isRunning();
+}
+
+void MenuGlances::tickScrollFx()
+{
+    mScrollFx.tick();
+}
+
+void MenuGlances::cycleScrollFx()
+{
+    const auto next = static_cast<GlanceScrollFx::Variant>(
+            (mScrollFx.getVariant() + 1) % GlanceScrollFx::kVariantCount);
+    mScrollFx.setVariant(next);
+    LOG_DEBUG("GlanceFx: variant %u, %s\n", static_cast<unsigned>(next),
+              GlanceScrollFx::variantName(next));
 }
 
 void MenuGlances::setNotifications(uint32_t callsNum, uint32_t emailsNum, uint32_t msgsNum)
@@ -47,7 +79,8 @@ void MenuGlances::updAppList(const std::shared_ptr<std::vector<App::GlanceData>>
     // Not in the middle of a scroll: changing the rows under a moving wheel
     // would land it somewhere the user did not ask for. The newest list waits
     // for the wheel to settle (applyPendingList()); older ones are dropped.
-    if (wheel.isAnimating()) {
+    // The same during a scroll transition: the item under it must not change.
+    if (isScrolling()) {
         mPendingList = list;
         mHasPendingList = true;
         return;
@@ -59,7 +92,7 @@ void MenuGlances::updAppList(const std::shared_ptr<std::vector<App::GlanceData>>
 
 void MenuGlances::applyPendingList()
 {
-    if (!mHasPendingList || wheel.isAnimating()) {
+    if (!mHasPendingList || isScrolling()) {
         return;
     }
     mHasPendingList = false;
@@ -136,6 +169,16 @@ int16_t MenuGlances::getNumberOfItems()
 
 void MenuGlances::selectNext()
 {
+    scrollBy(1);
+}
+
+void MenuGlances::selectPrev()
+{
+    scrollBy(-1);
+}
+
+void MenuGlances::scrollBy(int8_t direction)
+{
     if (wheel.getNumberOfItems() <= 1) {
         return;
     }
@@ -143,25 +186,28 @@ void MenuGlances::selectNext()
     // The user's choice now: an item still waiting to be restored is not.
     mWantedId = kNoWantedId;
 
-    int16_t p = wheel.getSelectedItem() + 1;
-    wheel.animateToItem(p, Gui::Config::kGlancesAnimationSteps);
-    sideBar.animateToId(p, Gui::Config::kGlancesAnimationSteps);
+    const int16_t p = wheel.getSelectedItem() + direction;
 
-    update();
-}
-
-void MenuGlances::selectPrev()
-{
-    if (wheel.getNumberOfItems() <= 1) {
+    if (mScrollFx.getVariant() == GlanceScrollFx::kNone) {
+        wheel.animateToItem(p, Gui::Config::kGlancesAnimationSteps);
+        sideBar.animateToId(p, Gui::Config::kGlancesAnimationSteps);
+        update();
         return;
     }
 
-    mWantedId = kNoWantedId;
-
-    int16_t p = wheel.getSelectedItem() - 1;
-    wheel.animateToItem(p, Gui::Config::kGlancesAnimationSteps);
-    sideBar.animateToId(p, Gui::Config::kGlancesAnimationSteps);
-
+    // The wheel jumps, so only whole items are ever drawn under the effect.
+    // A press while the last one is still on screen gets no effect at all:
+    // the framebuffer holds effect pixels then, not a clean item to break
+    // up, so the next item is simply drawn clean. Fast presses therefore go
+    // item to clean item, never through an empty or half-drawn one.
+    if (mScrollFx.isBusy()) {
+        mScrollFx.cancel();
+        sideBar.animateToId(p, 0);
+    } else {
+        mScrollFx.start(direction);
+        sideBar.animateToId(p, Gui::Config::kGlancesAnimationSteps);
+    }
+    wheel.animateToItem(p, 0);
     update();
 }
 
@@ -171,6 +217,7 @@ void MenuGlances::selectItem(int16_t itemIndex)
         return;
     }
 
+    mScrollFx.cancel();
     wheel.animateToItem(itemIndex, 0);
     sideBar.setActiveId(wheel.getSelectedItem());
 

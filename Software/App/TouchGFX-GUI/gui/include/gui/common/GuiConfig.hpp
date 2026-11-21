@@ -34,6 +34,13 @@ constexpr int32_t kMenuAnimationSteps = 4;
 /// the other menus are not part of that change.
 constexpr int32_t kGlancesAnimationSteps = 2;
 
+/// The Glances scroll transition, a prototype (see GlanceScrollFx):
+///  0 = the wheel's own animation, as above;
+///  1 = pixel break-up, 2 = dithered wipe, 3 = cube build.
+/// With 1 to 3 the wheel jumps and the effect is drawn over the centre item
+/// for two frames. The simulator cycles through all four with the v key.
+constexpr uint8_t kGlancesScrollFx = 0;
+
 constexpr uint32_t kScreenTimeoutSteps      = GUI_CONFIG_MS_2_TICKS(30000);     // 30s
 constexpr uint32_t kSavedScreenTimeout      = GUI_CONFIG_MS_2_TICKS(1000);      // 1s;
 constexpr uint32_t kTitleInfoSwitchPeriod   = GUI_CONFIG_MS_2_TICKS(3000);      // 3s;

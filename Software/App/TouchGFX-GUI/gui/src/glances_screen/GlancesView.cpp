@@ -94,11 +94,21 @@ void GlancesView::handleKeyEvent(uint8_t key)
     if (key == Gui::Config::Button::R2) {
         application().gotoHomeScreenNoTransition();
     }
+
+#if defined(SIMULATOR)
+    // The scroll transitions side by side in one build (GlanceScrollFx).
+    if (key == 'v') {
+        mCounter = Gui::Config::kGlanceScreenTimeout;
+        menu.cycleScrollFx();
+    }
+#endif
 }
 
 void GlancesView::handleTickEvent()
 {
     mFramesSinceOpen++;
+
+    menu.tickScrollFx();
 
     // A list that came in during a scroll, now that the wheel has settled.
     menu.applyPendingList();
